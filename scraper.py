@@ -4,10 +4,20 @@ Uses label-click pattern for shape/size/color/clarity/fluorescence/lab
 (these are custom components, not <select>). See config.py for selector
 templates. Company name + report date require an extra click+PDF-open
 per stone — set include_report_date=False to skip that for speed.
+
+WINDOWS NOTE: Streamlit runs your script in a worker thread that doesn't
+inherit Python's default ProactorEventLoop (needed on Windows for
+Playwright to spawn the browser subprocess). Running Playwright directly
+there throws NotImplementedError. Fix: run it inside a fresh thread where
+we explicitly set the Proactor event loop policy first — see run().
 """
 
 import re
+import sys
+import asyncio
+import threading
 from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor
 
 from playwright.sync_api import sync_playwright
 import pandas as pd
@@ -180,7 +190,22 @@ def run(username: str, password: str, company_name: str, filters: dict,
     """
     Full pipeline: login -> filter -> scrape -> summarize.
     Returns (summary_dict, details_dataframe)
+
+    Runs inside a dedicated thread with the Proactor event loop policy set
+    explicitly (Windows fix — see module docstring). Safe no-op on
+    macOS/Linux.
     """
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_run_impl, username, password, company_name,
+                                  filters, headless, include_report_date)
+        return future.result()
+
+
+def _run_impl(username: str, password: str, company_name: str, filters: dict,
+              headless: bool, include_report_date: bool):
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
         context = browser.new_context()
