@@ -55,6 +55,15 @@ def login(page, username: str, password: str):
         pass  # already past login, or timed out — apply_filters will fail loudly if not
 
 
+def goto_search_page(page):
+    """Login lands on Dashboard, not the filters page — navigate there
+    explicitly and wait for the Shape section to actually render before
+    any filter clicks are attempted (fixes 'label not found' timeouts)."""
+    page.goto(f"{LOGIN_URL}#/search")
+    page.wait_for_load_state("networkidle")
+    page.wait_for_selector(shape_label("Round"), timeout=30000)
+
+
 def apply_filters(page, filters: dict):
     """
     filters dict keys expected (matches your sheet's green columns):
@@ -230,6 +239,7 @@ def _run_impl(username: str, password: str, company_name: str, filters: dict,
         page = context.pages[0] if context.pages else context.new_page()
         try:
             login(page, username, password)
+            goto_search_page(page)
             apply_filters(page, filters)
             df = scrape_results(page, context, include_report_date=include_report_date)
         finally:
