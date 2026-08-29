@@ -61,7 +61,7 @@ def goto_search_page(page):
     any filter clicks are attempted (fixes 'label not found' timeouts)."""
     page.goto(f"{LOGIN_URL}#/search")
     page.wait_for_load_state("networkidle")
-    page.wait_for_selector(shape_label("Round"), timeout=30000)
+    page.wait_for_selector(shape_label("Round"), timeout=90000)
 
 
 def apply_filters(page, filters: dict):
@@ -237,6 +237,7 @@ def _run_impl(username: str, password: str, company_name: str, filters: dict,
             headless=headless,
         )
         page = context.pages[0] if context.pages else context.new_page()
+        page.set_default_timeout(90000)  # 90s for every action, not just the 30s default
         try:
             login(page, username, password)
             goto_search_page(page)
