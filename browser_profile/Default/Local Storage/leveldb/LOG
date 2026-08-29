@@ -1,5 +1,3 @@
-2026/08/29-17:05:11.996 403c Reusing MANIFEST D:\GitHub\Repos\dif_agent\browser_profile\Default\Local Storage\leveldb/MANIFEST-000001
-2026/08/29-17:05:12.024 403c Recovering log #15
-2026/08/29-17:05:12.044 403c Reusing old log D:\GitHub\Repos\dif_agent\browser_profile\Default\Local Storage\leveldb/000015.log 
-2026/08/29-17:07:54.660 5028 Level-0 table #20: started
-2026/08/29-17:07:54.707 5028 Level-0 table #20: 23085 bytes OK
+2026/08/29-17:31:20.859 5be0 Reusing MANIFEST D:\GitHub\Repos\dif_agent\browser_profile\Default\Local Storage\leveldb/MANIFEST-000001
+2026/08/29-17:31:20.904 5be0 Recovering log #19
+2026/08/29-17:31:20.926 5be0 Reusing old log D:\GitHub\Repos\dif_agent\browser_profile\Default\Local Storage\leveldb/000019.log 

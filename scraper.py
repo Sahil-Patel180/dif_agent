@@ -55,12 +55,12 @@ def goto_search_page(page):
     """Login lands on Dashboard, not the filters page. A raw page.goto()
     hash-jump can skip the SPA's router init — click the actual nav link
     instead, same as a real user would, then wait for Shape section to
-    render before any filter clicks are attempted. No networkidle wait —
-    see login() note above, same reason."""
-    nav_link = page.query_selector("a[href='#/search/rn']")
-    if nav_link:
-        nav_link.click()
-    else:
+    render before any filter clicks are attempted. Uses page.click()
+    (not query_selector+click) so Playwright re-locates the element fresh
+    right before clicking — React re-renders can detach a grabbed handle."""
+    try:
+        page.click("a[href='#/search/rn']", timeout=15000)
+    except Exception:
         page.goto(f"{LOGIN_URL}#/search/rn")
     page.wait_for_selector(shape_label("Round"), timeout=90000)
 
@@ -167,22 +167,37 @@ def scrape_results(page, context, include_report_date: bool = True) -> pd.DataFr
     clicked to expand and reveal the Seller/company name; optionally opens
     the cert PDF per stone to pull the report date (slow — one extra page
     load per stone). Set include_report_date=False to skip and go fast.
+
+    Re-queries the row list fresh before each click (index-based) instead
+    of reusing handles grabbed up front — clicking row 1 can re-render the
+    grid and detach the handles for rows 2+, causing stale-element errors.
     """
-    rows = page.query_selector_all(SELECTORS["result_rows"])
+    row_count = len(page.query_selector_all(SELECTORS["result_rows"]))
 
     records = []
-    for row in rows:
+    for i in range(row_count):
+        rows = page.query_selector_all(SELECTORS["result_rows"])
+        if i >= len(rows):
+            break  # grid shrank (filtered/re-rendered) — stop gracefully
+        row = rows[i]
+
         cells = row.query_selector_all(SELECTORS["result_cells"])
         if not cells:
             continue
 
-        def cell_text(i):
-            return cells[i].inner_text().strip() if i < len(cells) else None
+        def cell_text(j):
+            return cells[j].inner_text().strip() if j < len(cells) else None
 
-        record = {col: cell_text(i) for i, col in enumerate(RESULT_COLUMNS)}
+        record = {col: cell_text(j) for j, col in enumerate(RESULT_COLUMNS)}
 
-        # expand row to reveal company name + cert link
-        row.click()
+        # expand row to reveal company name + cert link — re-fetch fresh
+        # handle right before clicking to dodge staleness
+        try:
+            rows = page.query_selector_all(SELECTORS["result_rows"])
+            rows[i].click()
+        except Exception:
+            records.append(record)
+            continue
         page.wait_for_timeout(500)
 
         company_el = page.query_selector(SELECTORS["company_name"])
