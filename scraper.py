@@ -84,35 +84,45 @@ def apply_filters(page, filters: dict):
 
 
 def get_report_date(page, context) -> str | None:
-    """Opens the cert/report link in a new tab, downloads the PDF, extracts
-    the date text (e.g. 'May 27, 2026') from page 1. Requires pypdf.
-    Returns None if no cert link found or date not parseable."""
+    """Opens the cert/report link in a new tab and intercepts the PDF's raw
+    network response (the report renders in Chrome's built-in PDF viewer,
+    which lives in a shadow DOM Playwright can't click into — so instead of
+    clicking the download button, we grab the PDF bytes straight off the
+    network response that loads it). Extracts the date text (e.g.
+    'May 27, 2026') from page 1 via pypdf. Returns None if not found."""
     cert_link = page.query_selector(SELECTORS["cert_link"])
     if not cert_link:
         return None
 
+    pdf_bytes_holder = {}
+
+    def handle_response(response):
+        content_type = response.headers.get("content-type", "")
+        if "pdf" in content_type.lower() and "pdf" not in pdf_bytes_holder:
+            try:
+                pdf_bytes_holder["pdf"] = response.body()
+            except Exception:
+                pass
+
     with context.expect_page() as new_page_info:
         cert_link.click()
     cert_page = new_page_info.value
-    cert_page.wait_for_load_state()
+    cert_page.on("response", handle_response)
+    cert_page.wait_for_load_state("networkidle")
+    cert_page.wait_for_timeout(1000)  # give the PDF fetch a moment to fire/complete
 
     date_text = None
-    try:
-        with cert_page.expect_download() as download_info:
-            cert_page.click(SELECTORS["cert_download_button"])
-        download = download_info.value
-        pdf_path = download.path()
-        if pdf_path:
+    if "pdf" in pdf_bytes_holder:
+        try:
             from pypdf import PdfReader
-            reader = PdfReader(str(pdf_path))
+            reader = PdfReader(BytesIO(pdf_bytes_holder["pdf"]))
             text = reader.pages[0].extract_text() or ""
             match = re.search(r"[A-Z][a-z]+ \d{1,2}, \d{4}", text)
             date_text = match.group(0) if match else None
-    except Exception:
-        date_text = None
-    finally:
-        cert_page.close()
+        except Exception:
+            date_text = None
 
+    cert_page.close()
     return date_text
 
 

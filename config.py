@@ -19,7 +19,7 @@ SELECTORS = {
     "depth_percent_to": "input[id='filter.depth.depthPercentTo']",
 
     "search_button": "button[type='submit'][form='classicSearchForm']",
-    "result_rows": "div[class*='Table-tableRow']",
+    "result_rows": "div[class*='searchResultTable-tableRow']",
     "result_cells": "div[class*='table-col']",  # direct children of a row, in visual column order
 
     "company_name": "div[class*='seller-col-new__CompanyNameRow']",
@@ -28,7 +28,6 @@ SELECTORS = {
     # --- still TODO: verify via DevTools ---
     "carat_min_input": "#caratMin",          # TODO: verify — text input in Size row
     "carat_max_input": "#caratMax",          # TODO: verify
-    "cert_download_button": "[title='Download']",  # TODO: verify — toolbar download icon on report viewer page
 }
 
 
