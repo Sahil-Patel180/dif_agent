@@ -1,40 +1,87 @@
 """
 config.py — central place for selectors + dropdown option lists.
-Edit selectors here once verified via DevTools; scraper.py imports from here.
+
+Rapaport's search page uses custom label/button components tied to hidden
+inputs — NOT plain <select> for shape/size/color/clarity/fluorescence/lab.
+Those are clicked via the label's `for` attribute. Only a few fields
+(depth%, carat) are real text <input>.
 """
 
 LOGIN_URL = "https://trade.rapaport.com/"
 
 SELECTORS = {
-    "username_field": "#emailUserName",          # TODO: verify
-    "password_field": "#password",          # TODO: verify
-    "login_button": "btn-login",  # TODO: verify
+    # --- confirmed ---
+    "username_field": "#emailUserName",
+    "password_field": "#password",
+    "login_button": "#btn-login",
 
-    "shape_select": "#shapeSelect",          # TODO: verify
-    "carat_min_input": "#caratMin",          # TODO: verify
+    "depth_percent_from": "input[id='filter.depth.depthPercentFrom']",
+    "depth_percent_to": "input[id='filter.depth.depthPercentTo']",
+
+    "search_button": "button[type='submit'][form='classicSearchForm']",
+    "result_rows": "div[class*='Table-tableRow']",
+    "result_cells": "div[class*='table-col']",  # direct children of a row, in visual column order
+
+    "company_name": "div[class*='seller-col-new__CompanyNameRow']",
+    "cert_link": "a[href*='certificateviewer']",
+
+    # --- still TODO: verify via DevTools ---
+    "carat_min_input": "#caratMin",          # TODO: verify — text input in Size row
     "carat_max_input": "#caratMax",          # TODO: verify
-    "color_min_select": "#colorMin",         # TODO: verify
-    "color_max_select": "#colorMax",         # TODO: verify
-    "clarity_min_select": "#claritySelectMin",  # TODO: verify
-    "clarity_max_select": "#claritySelectMax",  # TODO: verify
-    "cut_select": "#cutSelect",              # TODO: verify
-    "polish_select": "#polishSelect",        # TODO: verify
-    "symmetry_select": "#symmetrySelect",    # TODO: verify
-    "fluorescence_select": "#fluorescenceSelect",  # TODO: verify
-    "search_button": "button#searchBtn",     # TODO: verify
-
-    "result_rows": "table#resultsTable tbody tr",  # TODO: verify
+    "cert_download_button": "[title='Download']",  # TODO: verify — toolbar download icon on report viewer page
 }
 
-# column index order inside each result row — fix once you count real table
+
+def shape_label(shape_name: str) -> str:
+    """e.g. shape_label('Round') -> label[for='filter.shape.shapes.Round']"""
+    return f"label[for='filter.shape.shapes.{shape_name}']"
+
+
+def size_range_label(range_text: str) -> str:
+    """e.g. size_range_label('0.30 - 0.39') -> matches preset size button"""
+    return f"label[for='{range_text}']"
+
+
+def color_label(letter: str) -> str:
+    """e.g. color_label('D') -> label[for='filter.color.D']"""
+    return f"label[for='filter.color.{letter}']"
+
+
+def clarity_label(clarity: str) -> str:
+    """e.g. clarity_label('VVS1') -> label[for='undefined.VVS1']
+    NOTE: site bug — real 'for' value is 'undefined.<Clarity>', confirmed
+    from live DOM, not 'filter.clarity.<Clarity>'."""
+    return f"label[for='undefined.{clarity}']"
+
+
+def fluorescence_label(level: str) -> str:
+    """e.g. fluorescence_label('None') -> label[for='filter.fluorescence.None']"""
+    return f"label[for='filter.fluorescence.{level}']"
+
+
+def lab_label(lab_code: str) -> str:
+    """e.g. lab_label('IGI') -> label[for='filter.labs.IGI']"""
+    return f"label[for='filter.labs.{lab_code}']"
+
+
+def finish_quick_button(label: str) -> str:
+    """e.g. finish_quick_button('3X') -> sets Cut+Polish+Symmetry all at once
+    to the same grade in a single click. label in {'3X','EX-','VG+','VG-'}"""
+    return f"div[class*='finish__GroupWrapper'] button:has-text('{label}')"
+
+
+# visual column order in the results grid (from live screenshot header row)
 RESULT_COLUMNS = [
-    "Packet No.", "Shape", "Cts", "Col", "Cla", "Cut", "Pol", "Sym", "FL",
-    "Lus", "Rap Price", "Quotation Price", "Back (Discount %)", "Lab",
-    "Depth %", "Table", "Dia/LW", "Meas",
+    "Seller", "Status", "Rating", "Location", "Shape", "Size", "Color",
+    "Shade", "Clarity", "Cut", "Polish", "Symmetry", "Fluorescence", "Lab",
+    "%Rap (Back Discount)", "$/Ct", "Total", "Depth", "Table",
+    "Measurements", "Diamond Lot #", "Diamond Stock #",
 ]
 
-SHAPE_OPTIONS = ["", "RD", "PR", "EM", "OV", "MQ", "PS", "RA", "CU", "AS", "HS"]
-GRADE_OPTIONS = ["", "EX", "VG", "GD", "FR", "PR"]
+SHAPE_OPTIONS = ["", "Round", "Pear", "Oval", "Marquise", "Heart", "Radiant",
+                  "Princess", "Emerald", "Asscher", "Sq. Emerald"]
+GRADE_OPTIONS = ["", "3X", "EX-", "VG+", "VG-"]  # quick Finish presets (Cut+Pol+Sym together)
 COLOR_OPTIONS = ["", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M"]
 CLARITY_OPTIONS = ["", "FL", "IF", "VVS1", "VVS2", "VS1", "VS2", "SI1", "SI2", "I1"]
-FLUORESCENCE_OPTIONS = ["", "NONE", "FA", "MED", "STG", "VST"]
+FLUORESCENCE_OPTIONS = ["", "None", "Very Slight", "Faint / Slight", "Medium", "Strong", "Very Strong"]
+LAB_OPTIONS = ["", "GIA", "GIA DOR", "HRD", "IGI", "AGS", "CGL", "DBIOD", "GCAL", "GHI", "GII"]
