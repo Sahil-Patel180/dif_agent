@@ -59,7 +59,7 @@ def goto_search_page(page):
     """Login lands on Dashboard, not the filters page — navigate there
     explicitly and wait for the Shape section to actually render before
     any filter clicks are attempted (fixes 'label not found' timeouts)."""
-    page.goto(f"{LOGIN_URL}#/search")
+    page.goto(f"{LOGIN_URL}#/search/rn")
     page.wait_for_load_state("networkidle")
     page.wait_for_selector(shape_label("Round"), timeout=90000)
 
