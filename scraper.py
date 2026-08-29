@@ -31,36 +31,37 @@ from config import (
 
 def login(page, username: str, password: str):
     page.goto(LOGIN_URL)
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     # Saved profile already trusted -> Rapaport auto-redirects past login.
-    # Nothing to do, no OTP needed.
+    # Confirm by waiting for the Diamonds nav link (dashboard marker)
+    # instead of networkidle — chat widget/ad banners keep network busy
+    # forever, so networkidle can hang indefinitely and never fire.
     if page.query_selector(SELECTORS["username_field"]) is None:
+        page.wait_for_selector("a[href='#/search/rn']", timeout=60000)
         return
 
     page.fill(SELECTORS["username_field"], username)
     page.fill(SELECTORS["password_field"], password)
     page.click(SELECTORS["login_button"])
-    page.wait_for_load_state("networkidle")
 
     # If an OTP screen appears (new device), give time for manual entry —
-    # only happens on first run per profile. Polls up to 2 minutes for the
-    # URL to move off the login page (e.g. to #/dashboard or #/search).
-    try:
-        page.wait_for_function(
-            "() => !location.hash.includes('login')",
-            timeout=120000,
-        )
-    except Exception:
-        pass  # already past login, or timed out — apply_filters will fail loudly if not
+    # only happens on first run per profile. Waits up to 2 minutes for the
+    # Diamonds nav link to show up, meaning login (and OTP, if any) is done.
+    page.wait_for_selector("a[href='#/search/rn']", timeout=120000)
 
 
 def goto_search_page(page):
-    """Login lands on Dashboard, not the filters page — navigate there
-    explicitly and wait for the Shape section to actually render before
-    any filter clicks are attempted (fixes 'label not found' timeouts)."""
-    page.goto(f"{LOGIN_URL}#/search/rn")
-    page.wait_for_load_state("networkidle")
+    """Login lands on Dashboard, not the filters page. A raw page.goto()
+    hash-jump can skip the SPA's router init — click the actual nav link
+    instead, same as a real user would, then wait for Shape section to
+    render before any filter clicks are attempted. No networkidle wait —
+    see login() note above, same reason."""
+    nav_link = page.query_selector("a[href='#/search/rn']")
+    if nav_link:
+        nav_link.click()
+    else:
+        page.goto(f"{LOGIN_URL}#/search/rn")
     page.wait_for_selector(shape_label("Round"), timeout=90000)
 
 
@@ -114,7 +115,7 @@ def apply_filters(page, filters: dict):
         page.fill(SELECTORS["depth_percent_to"], str(filters["depth_max"]))
 
     page.click(SELECTORS["search_button"])
-    page.wait_for_load_state("networkidle")
+    page.wait_for_selector(SELECTORS["result_rows"], timeout=60000)
 
 
 def get_report_date(page, context) -> str | None:
