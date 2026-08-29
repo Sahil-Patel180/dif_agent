@@ -6,9 +6,9 @@ Edit selectors here once verified via DevTools; scraper.py imports from here.
 LOGIN_URL = "https://trade.rapaport.com/"
 
 SELECTORS = {
-    "username_field": "#username",          # TODO: verify
+    "username_field": "#emailUserName",          # TODO: verify
     "password_field": "#password",          # TODO: verify
-    "login_button": "button[type='submit']",  # TODO: verify
+    "login_button": "btn-login",  # TODO: verify
 
     "shape_select": "#shapeSelect",          # TODO: verify
     "carat_min_input": "#caratMin",          # TODO: verify
