@@ -1,2 +1,3 @@
-2026/08/29-13:51:07.304 389c Creating DB D:\GitHub\Repos\dif_agent\browser_profile\Default\IndexedDB\https_login.rapaport.com_0.indexeddb.leveldb since it was missing.
-2026/08/29-13:51:07.327 389c Reusing MANIFEST D:\GitHub\Repos\dif_agent\browser_profile\Default\IndexedDB\https_login.rapaport.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/08/29-16:12:12.165 2640 Reusing MANIFEST D:\GitHub\Repos\dif_agent\browser_profile\Default\IndexedDB\https_login.rapaport.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/08/29-16:12:12.166 2640 Recovering log #3
+2026/08/29-16:12:12.167 2640 Reusing old log D:\GitHub\Repos\dif_agent\browser_profile\Default\IndexedDB\https_login.rapaport.com_0.indexeddb.leveldb/000003.log 

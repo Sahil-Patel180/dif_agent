@@ -118,6 +118,48 @@ def apply_filters(page, filters: dict):
     page.wait_for_selector(SELECTORS["result_rows"], timeout=60000)
 
 
+def get_total_result_count(page) -> int | None:
+    """Reads the '312 Diamonds' style heading at the top of results to know
+    how many rows we're aiming to load. Returns None if not found (falls
+    back to stall-detection only in load_all_result_rows)."""
+    try:
+        text = page.locator("text=/\\d+\\s+Diamonds?/i").first.inner_text(timeout=5000)
+        match = re.search(r"(\d+)", text)
+        return int(match.group(1)) if match else None
+    except Exception:
+        return None
+
+
+def load_all_result_rows(page, expected_total: int | None = None, max_iterations: int = 150):
+    """Results load as scroll-triggered pages (data-diamond-page batches),
+    not all at once — DOM starts with ~23 rows. Keeps scrolling until row
+    count reaches expected_total or stops growing for a few iterations."""
+    stall = 0
+    last_count = -1
+    for _ in range(max_iterations):
+        current_count = len(page.query_selector_all(SELECTORS["result_rows"]))
+        if expected_total and current_count >= expected_total:
+            break
+        if current_count == last_count:
+            stall += 1
+            if stall >= 5:
+                break
+        else:
+            stall = 0
+        last_count = current_count
+        page.mouse.wheel(0, 3000)
+        page.wait_for_timeout(700)
+
+
+def parse_company_from_seller(seller_text: str | None) -> str | None:
+    """Seller cell text is like 'SK\\nSKRISHNA' — 2-letter code + company
+    name on the next line. No row-click needed, it's already there."""
+    if not seller_text:
+        return None
+    lines = [l.strip() for l in seller_text.split("\n") if l.strip()]
+    return lines[-1] if lines else seller_text.strip()
+
+
 def get_report_date(page, context) -> str | None:
     """Opens the cert/report link in a new tab and intercepts the PDF's raw
     network response (the report renders in Chrome's built-in PDF viewer,
@@ -161,26 +203,21 @@ def get_report_date(page, context) -> str | None:
     return date_text
 
 
-def scrape_results(page, context, include_report_date: bool = True) -> pd.DataFrame:
+def scrape_results(page, context, include_report_date: bool = False) -> pd.DataFrame:
     """
-    Scrapes the results grid (div-based, not a real <table>). Each row is
-    clicked to expand and reveal the Seller/company name; optionally opens
-    the cert PDF per stone to pull the report date (slow — one extra page
-    load per stone). Set include_report_date=False to skip and go fast.
+    Loads every result page (scroll-triggered), then scrapes the full grid
+    in one pass. Company name is parsed straight from the Seller cell text
+    — no row-click needed for that. Row-click is only used if
+    include_report_date=True (opens each cert PDF — slow, one extra tab
+    per stone, use only for smaller result sets).
+    """
+    expected_total = get_total_result_count(page)
+    load_all_result_rows(page, expected_total=expected_total)
 
-    Re-queries the row list fresh before each click (index-based) instead
-    of reusing handles grabbed up front — clicking row 1 can re-render the
-    grid and detach the handles for rows 2+, causing stale-element errors.
-    """
-    row_count = len(page.query_selector_all(SELECTORS["result_rows"]))
+    rows = page.query_selector_all(SELECTORS["result_rows"])
 
     records = []
-    for i in range(row_count):
-        rows = page.query_selector_all(SELECTORS["result_rows"])
-        if i >= len(rows):
-            break  # grid shrank (filtered/re-rendered) — stop gracefully
-        row = rows[i]
-
+    for i, row in enumerate(rows):
         cells = row.query_selector_all(SELECTORS["result_cells"])
         if not cells:
             continue
@@ -189,47 +226,67 @@ def scrape_results(page, context, include_report_date: bool = True) -> pd.DataFr
             return cells[j].inner_text().strip() if j < len(cells) else None
 
         record = {col: cell_text(j) for j, col in enumerate(RESULT_COLUMNS)}
-
-        # expand row to reveal company name + cert link — re-fetch fresh
-        # handle right before clicking to dodge staleness
-        try:
-            rows = page.query_selector_all(SELECTORS["result_rows"])
-            rows[i].click()
-        except Exception:
-            records.append(record)
-            continue
-        page.wait_for_timeout(500)
-
-        company_el = page.query_selector(SELECTORS["company_name"])
-        record["Company"] = company_el.inner_text().strip() if company_el else None
+        record["Company"] = parse_company_from_seller(record.get("Seller"))
 
         if include_report_date:
-            record["Report Date"] = get_report_date(page, context)
+            try:
+                fresh_rows = page.query_selector_all(SELECTORS["result_rows"])
+                if i < len(fresh_rows):
+                    fresh_rows[i].click()
+                    page.wait_for_timeout(500)
+                    record["Report Date"] = get_report_date(page, context)
+            except Exception:
+                record["Report Date"] = None
 
         records.append(record)
 
     return pd.DataFrame(records)
 
 
-def compute_min_max_discount(df: pd.DataFrame, company_name: str) -> dict:
-    col = "%Rap (Back Discount)"
-    disc = pd.to_numeric(
-        df[col].astype(str).str.replace("%", "").str.strip(),
+def compute_company_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Groups results by Company (parsed from Seller) — Min/Max Discount%,
+    Min/Max $/Ct, Min/Max Total, and row count per company."""
+    if df.empty:
+        return pd.DataFrame(columns=[
+            "Company", "Min Discount %", "Max Discount %",
+            "Min $/Ct", "Max $/Ct", "Min Total", "Max Total", "Rows",
+        ])
+
+    work = df.copy()
+    disc_col = "%Rap (Back Discount)"
+    work["_Discount"] = pd.to_numeric(
+        work[disc_col].astype(str).str.extract(r"(-?\d+\.?\d*)\s*%?")[0],
         errors="coerce",
     )
-    return {
-        "Company": company_name,
-        "Min Discount %": disc.min(),
-        "Max Discount %": disc.max(),
-        "Rows Fetched": len(df),
-    }
+    work["_PerCt"] = pd.to_numeric(
+        work["$/Ct"].astype(str).str.replace(r"[^\d.]", "", regex=True),
+        errors="coerce",
+    )
+    work["_Total"] = pd.to_numeric(
+        work["Total"].astype(str).str.replace(r"[^\d.]", "", regex=True),
+        errors="coerce",
+    )
+
+    summary = work.groupby("Company", dropna=False).agg(
+        **{
+            "Min Discount %": ("_Discount", "min"),
+            "Max Discount %": ("_Discount", "max"),
+            "Min $/Ct": ("_PerCt", "min"),
+            "Max $/Ct": ("_PerCt", "max"),
+            "Min Total": ("_Total", "min"),
+            "Max Total": ("_Total", "max"),
+            "Rows": ("_Discount", "size"),
+        }
+    ).reset_index().sort_values("Company")
+
+    return summary
 
 
 def run(username: str, password: str, company_name: str, filters: dict,
-        headless: bool = True, include_report_date: bool = True):
+        headless: bool = True, include_report_date: bool = False):
     """
-    Full pipeline: login -> filter -> scrape -> summarize.
-    Returns (summary_dict, details_dataframe)
+    Full pipeline: login -> filter -> scrape (all pages) -> per-company
+    summary. Returns (summary_df, details_dataframe)
 
     Runs inside a dedicated thread with the Proactor event loop policy set
     explicitly (Windows fix — see module docstring). Safe no-op on
@@ -262,7 +319,5 @@ def _run_impl(username: str, password: str, company_name: str, filters: dict,
         finally:
             context.close()
 
-    summary = compute_min_max_discount(df, company_name) if not df.empty else {
-        "Company": company_name, "Min Discount %": None, "Max Discount %": None, "Rows Fetched": 0
-    }
-    return summary, df
+    summary_df = compute_company_summary(df)
+    return summary_df, df

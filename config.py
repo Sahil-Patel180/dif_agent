@@ -31,7 +31,7 @@ SELECTORS = {
 
     "search_button": "button[type='submit'][form='classicSearchForm']",
     "result_rows": "div[class*='searchResultTable-tableRow']",
-    "result_cells": "div[class*='table-col']",  # direct children of a row, in visual column order
+    "result_cells": ":scope > div[class*='table-col']",  # direct children only — avoids grabbing nested duplicate divs that also match 'table-col'
 
     "company_name": "div[class*='seller-col-new__CompanyNameRow']",
     "cert_link": "a[href*='certificateviewer']",
@@ -84,7 +84,7 @@ def finish_quick_button(label: str) -> str:
 RESULT_COLUMNS = [
     "Seller", "Status", "Rating", "Location", "Shape", "Size", "Color",
     "Shade", "Clarity", "Cut", "Polish", "Symmetry", "Fluorescence", "Lab",
-    "%Rap (Back Discount)", "$/Ct", "Total", "Depth", "Table",
+    "%Rap (Back Discount)", "$/Ct", "Total", "Info & Media", "Depth", "Table",
     "Measurements", "Diamond Lot #", "Diamond Stock #",
 ]
 

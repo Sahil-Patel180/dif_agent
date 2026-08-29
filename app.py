@@ -72,7 +72,7 @@ if st.button("Run Search"):
         }
         with st.spinner("Logging in and fetching results..."):
             try:
-                summary, df = run(
+                summary_df, df = run(
                     username, password, company_name or "Unknown", filters,
                     headless=headless, include_report_date=include_report_date,
                 )
@@ -82,13 +82,13 @@ if st.button("Run Search"):
                          "Uncheck 'Run headless' and re-run to watch the browser and fix selectors.")
                 st.stop()
 
-        st.subheader("Summary")
-        st.table(pd.DataFrame([summary]))
+        st.subheader("Summary (per company)")
+        st.dataframe(summary_df)
 
-        st.subheader("Report Data")
+        st.subheader(f"Report Data ({len(df)} rows)")
         st.dataframe(df)
 
-        excel_bytes = build_excel(summary, df)
+        excel_bytes = build_excel(summary_df, df)
 
         st.download_button(
             "Download Excel Report",
