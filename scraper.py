@@ -23,7 +23,7 @@ from playwright.sync_api import sync_playwright
 import pandas as pd
 
 from config import (
-    LOGIN_URL, SELECTORS, RESULT_COLUMNS,
+    LOGIN_URL, SELECTORS, RESULT_COLUMNS, PROFILE_DIR,
     shape_label, size_range_label, color_label, clarity_label,
     fluorescence_label, lab_label, finish_quick_button,
 )
@@ -33,11 +33,26 @@ def login(page, username: str, password: str):
     page.goto(LOGIN_URL)
     page.wait_for_load_state("networkidle")
 
+    # Saved profile already trusted -> Rapaport auto-redirects past login.
+    # Nothing to do, no OTP needed.
+    if page.query_selector(SELECTORS["username_field"]) is None:
+        return
+
     page.fill(SELECTORS["username_field"], username)
     page.fill(SELECTORS["password_field"], password)
     page.click(SELECTORS["login_button"])
-
     page.wait_for_load_state("networkidle")
+
+    # If an OTP screen appears (new device), give time for manual entry —
+    # only happens on first run per profile. Polls up to 2 minutes for the
+    # URL to move off the login page (e.g. to #/dashboard or #/search).
+    try:
+        page.wait_for_function(
+            "() => !location.hash.includes('login')",
+            timeout=120000,
+        )
+    except Exception:
+        pass  # already past login, or timed out — apply_filters will fail loudly if not
 
 
 def apply_filters(page, filters: dict):
@@ -207,15 +222,18 @@ def _run_impl(username: str, password: str, company_name: str, filters: dict,
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
-        context = browser.new_context()
-        page = context.new_page()
+        context = p.chromium.launch_persistent_context(
+            user_data_dir=PROFILE_DIR,
+            channel="chrome",   # use real installed Chrome, not bundled Chromium
+            headless=headless,
+        )
+        page = context.pages[0] if context.pages else context.new_page()
         try:
             login(page, username, password)
             apply_filters(page, filters)
             df = scrape_results(page, context, include_report_date=include_report_date)
         finally:
-            browser.close()
+            context.close()
 
     summary = compute_min_max_discount(df, company_name) if not df.empty else {
         "Company": company_name, "Min Discount %": None, "Max Discount %": None, "Rows Fetched": 0

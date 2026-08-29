@@ -7,7 +7,18 @@ Those are clicked via the label's `for` attribute. Only a few fields
 (depth%, carat) are real text <input>.
 """
 
+import os
+
 LOGIN_URL = "https://trade.rapaport.com/"
+
+# Persistent Chrome profile dir — reused across runs so "remember this
+# device 30 days" sticks and OTP isn't re-triggered every time. First run
+# must be headless=False so you can complete OTP manually once; the
+# device-trust cookie then lives in this folder for later runs.
+PROFILE_DIR = os.getenv(
+    "RAPAPORT_PROFILE_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "browser_profile"),
+)
 
 SELECTORS = {
     # --- confirmed ---
