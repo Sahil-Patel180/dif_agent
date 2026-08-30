@@ -157,7 +157,7 @@ def _row_key(record: dict) -> str:
 
 
 def collect_all_rows(page, context, expected_total: int | None = None,
-                      include_report_date: bool = False, max_iterations: int = 250):
+                      include_report_date: bool = False, max_iterations: int = 400):
     """
     This grid is VIRTUALIZED — rows scrolled past get unmounted from the
     DOM (confirmed live: row count fluctuates 33-58 while scrolling instead
@@ -202,7 +202,7 @@ def collect_all_rows(page, context, expected_total: int | None = None,
             break
         if new_this_round == 0:
             stall += 1
-            if stall >= 8:
+            if stall >= 15:
                 print("[collect_all_rows] stalled — no new unique rows found, stopping")
                 break
         else:
@@ -217,13 +217,22 @@ def collect_all_rows(page, context, expected_total: int | None = None,
         container = page.query_selector(SELECTORS["result_scroll_container"])
         if container:
             try:
-                page.evaluate("el => el.scrollTop = el.scrollHeight", container)
+                # overscroll past current bottom each time, not just to
+                # current scrollHeight — forces a real scroll delta even
+                # when already near the bottom, which is what actually
+                # triggers the next batch fetch
+                page.evaluate("el => el.scrollTop = el.scrollHeight + 2000", container)
             except Exception:
                 pass
 
         page.mouse.move(700, 600)
-        page.mouse.wheel(0, 2000)
-        page.wait_for_timeout(900)
+        page.mouse.wheel(0, 2500)
+
+        # give the next batch time to actually fetch + render — scales up
+        # the longer we've been stalled, since it "takes a moment" per the
+        # site's own behavior, not an instant response
+        wait_ms = 900 + (stall * 700)
+        page.wait_for_timeout(min(wait_ms, 6000))
 
     return list(seen.values())
 
