@@ -1,17 +1,6 @@
-2026/08/29-22:09:33.911 3d18 Reusing MANIFEST D:\GitHub\Repos\dif_agent\browser_profile\Default\Local Storage\leveldb/MANIFEST-000001
-2026/08/29-22:09:33.924 3d18 Recovering log #24
-2026/08/29-22:09:33.928 3d18 Level-0 table #26: started
-2026/08/29-22:09:33.936 3d18 Level-0 table #26: 32033 bytes OK
-2026/08/29-22:09:33.937 3d18 Recovering log #26
-2026/08/29-22:09:33.941 3d18 Reusing old log D:\GitHub\Repos\dif_agent\browser_profile\Default\Local Storage\leveldb/000026.log 
-2026/08/29-22:09:33.943 3d18 Delete type=0 #24
-2026/08/29-22:09:33.943 3d18 Delete type=2 #27
-2026/08/29-22:09:33.960 3d18 Compacting 4@0 + 1@1 files
-2026/08/29-22:09:34.074 3d18 Generated table #27@0: 135 keys, 40899 bytes
-2026/08/29-22:09:34.075 3d18 Compacted 4@0 + 1@1 files => 40899 bytes
-2026/08/29-22:09:34.307 3d18 compacted to: files[ 0 1 1 0 0 0 0 ]
-2026/08/29-22:09:34.311 3d18 Delete type=2 #17
-2026/08/29-22:09:34.311 3d18 Delete type=2 #19
-2026/08/29-22:09:34.311 3d18 Delete type=2 #22
-2026/08/29-22:09:34.311 3d18 Delete type=2 #24
-2026/08/29-22:09:34.311 3d18 Delete type=2 #26
+2026/08/30-09:04:17.454 2efc Reusing MANIFEST D:\GitHub\Repos\dif_agent\browser_profile\Default\Local Storage\leveldb/MANIFEST-000001
+2026/08/30-09:04:17.467 2efc Recovering log #33
+2026/08/30-09:04:17.476 2efc Reusing old log D:\GitHub\Repos\dif_agent\browser_profile\Default\Local Storage\leveldb/000033.log 
+2026/08/30-09:06:19.892 1dc8 Level-0 table #36: started
+2026/08/30-09:06:19.902 1dc8 Level-0 table #36: 33215 bytes OK
+2026/08/30-09:06:19.906 1dc8 Delete type=0 #33

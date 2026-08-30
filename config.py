@@ -32,6 +32,7 @@ SELECTORS = {
     "search_button": "button[type='submit'][form='classicSearchForm']",
     "result_rows": "div[class*='searchResultTable-tableRow']",
     "result_cells": ":scope > div[class*='table-col']",  # direct children only — avoids grabbing nested duplicate divs that also match 'table-col'
+    "result_scroll_container": "div[class*='table-ScrollableTable'], div[id='searchResultTable-tableBody']",
 
     "company_name": "div[class*='seller-col-new__CompanyNameRow']",
     "cert_link": "a[href*='certificateviewer']",

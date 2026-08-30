@@ -130,25 +130,102 @@ def get_total_result_count(page) -> int | None:
         return None
 
 
-def load_all_result_rows(page, expected_total: int | None = None, max_iterations: int = 150):
-    """Results load as scroll-triggered pages (data-diamond-page batches),
-    not all at once — DOM starts with ~23 rows. Keeps scrolling until row
-    count reaches expected_total or stops growing for a few iterations."""
+def _extract_row_record(row) -> dict | None:
+    """Pulls one row's cell text into a dict keyed by RESULT_COLUMNS."""
+    cells = row.query_selector_all(SELECTORS["result_cells"])
+    if not cells:
+        return None
+
+    def cell_text(j):
+        return cells[j].inner_text().strip() if j < len(cells) else None
+
+    record = {col: cell_text(j) for j, col in enumerate(RESULT_COLUMNS)}
+    record["Company"] = parse_company_from_seller(record.get("Seller"))
+    return record
+
+
+def _row_key(record: dict) -> str:
+    """Unique key for de-duping across scroll steps. Prefers the real
+    Diamond Lot #/Stock #, falls back to a composite of visible fields
+    if those are blank for some reason."""
+    key = record.get("Diamond Lot #") or record.get("Diamond Stock #")
+    if key:
+        return str(key)
+    return "|".join(str(record.get(k)) for k in [
+        "Seller", "Size", "Color", "Clarity", "%Rap (Back Discount)", "$/Ct",
+    ])
+
+
+def collect_all_rows(page, context, expected_total: int | None = None,
+                      include_report_date: bool = False, max_iterations: int = 250):
+    """
+    This grid is VIRTUALIZED — rows scrolled past get unmounted from the
+    DOM (confirmed live: row count fluctuates 33-58 while scrolling instead
+    of growing monotonically). A single 'scroll everything then scrape'
+    pass can't work here — earlier rows vanish before we reach them.
+
+    Instead: scrape whatever's currently in the DOM at EVERY scroll step,
+    dedupe by unique key, and keep going until the unique count hits
+    expected_total or stalls (no new uniques for several rounds).
+    """
+    seen: dict[str, dict] = {}
     stall = 0
-    last_count = -1
-    for _ in range(max_iterations):
-        current_count = len(page.query_selector_all(SELECTORS["result_rows"]))
-        if expected_total and current_count >= expected_total:
+
+    for i in range(max_iterations):
+        rows = page.query_selector_all(SELECTORS["result_rows"])
+        new_this_round = 0
+
+        for row in rows:
+            record = _extract_row_record(row)
+            if not record:
+                continue
+            key = _row_key(record)
+            if key in seen:
+                continue
+
+            if include_report_date:
+                try:
+                    row.click()
+                    page.wait_for_timeout(500)
+                    record["Report Date"] = get_report_date(page, context)
+                except Exception:
+                    record["Report Date"] = None
+
+            seen[key] = record
+            new_this_round += 1
+
+        print(f"[collect_all_rows] iteration {i}: {len(seen)} unique rows collected"
+              + (f" / {expected_total} expected" if expected_total else "")
+              + f" (+{new_this_round} this round)")
+
+        if expected_total and len(seen) >= expected_total:
             break
-        if current_count == last_count:
+        if new_this_round == 0:
             stall += 1
-            if stall >= 5:
+            if stall >= 8:
+                print("[collect_all_rows] stalled — no new unique rows found, stopping")
                 break
         else:
             stall = 0
-        last_count = current_count
-        page.mouse.wheel(0, 3000)
-        page.wait_for_timeout(700)
+
+        if rows:
+            try:
+                rows[-1].scroll_into_view_if_needed(timeout=5000)
+            except Exception:
+                pass
+
+        container = page.query_selector(SELECTORS["result_scroll_container"])
+        if container:
+            try:
+                page.evaluate("el => el.scrollTop = el.scrollHeight", container)
+            except Exception:
+                pass
+
+        page.mouse.move(700, 600)
+        page.mouse.wheel(0, 2000)
+        page.wait_for_timeout(900)
+
+    return list(seen.values())
 
 
 def parse_company_from_seller(seller_text: str | None) -> str | None:
@@ -205,41 +282,12 @@ def get_report_date(page, context) -> str | None:
 
 def scrape_results(page, context, include_report_date: bool = False) -> pd.DataFrame:
     """
-    Loads every result page (scroll-triggered), then scrapes the full grid
-    in one pass. Company name is parsed straight from the Seller cell text
-    — no row-click needed for that. Row-click is only used if
-    include_report_date=True (opens each cert PDF — slow, one extra tab
-    per stone, use only for smaller result sets).
+    Scrapes the (virtualized) results grid via incremental scroll+collect —
+    see collect_all_rows() for why a single-pass scrape can't work here.
     """
     expected_total = get_total_result_count(page)
-    load_all_result_rows(page, expected_total=expected_total)
-
-    rows = page.query_selector_all(SELECTORS["result_rows"])
-
-    records = []
-    for i, row in enumerate(rows):
-        cells = row.query_selector_all(SELECTORS["result_cells"])
-        if not cells:
-            continue
-
-        def cell_text(j):
-            return cells[j].inner_text().strip() if j < len(cells) else None
-
-        record = {col: cell_text(j) for j, col in enumerate(RESULT_COLUMNS)}
-        record["Company"] = parse_company_from_seller(record.get("Seller"))
-
-        if include_report_date:
-            try:
-                fresh_rows = page.query_selector_all(SELECTORS["result_rows"])
-                if i < len(fresh_rows):
-                    fresh_rows[i].click()
-                    page.wait_for_timeout(500)
-                    record["Report Date"] = get_report_date(page, context)
-            except Exception:
-                record["Report Date"] = None
-
-        records.append(record)
-
+    records = collect_all_rows(page, context, expected_total=expected_total,
+                                include_report_date=include_report_date)
     return pd.DataFrame(records)
 
 
