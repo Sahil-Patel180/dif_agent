@@ -2,9 +2,9 @@
 config.py — central place for selectors + dropdown option lists.
 
 Rapaport's search page uses custom label/button components tied to hidden
-inputs — NOT plain <select> for shape/size/color/clarity/fluorescence/lab.
-Those are clicked via the label's `for` attribute. Only a few fields
-(depth%, carat) are real text <input>.
+inputs — NOT plain <select> for shape/color/clarity/fluorescence/lab/show-only.
+Those are clicked via the label's `for` attribute. Size (carat) and depth%
+are real text <input> fields.
 """
 
 import os
@@ -21,36 +21,37 @@ PROFILE_DIR = os.getenv(
 )
 
 SELECTORS = {
-    # --- confirmed ---
     "username_field": "#emailUserName",
     "password_field": "#password",
     "login_button": "#btn-login",
 
+    "carat_from_input": "input[id='filter.size.sizeFrom']",
+    "carat_to_input": "input[id='filter.size.sizeTo']",
+
     "depth_percent_from": "input[id='filter.depth.depthPercentFrom']",
     "depth_percent_to": "input[id='filter.depth.depthPercentTo']",
+    # Depth% lives under the collapsed "Measurements" section — must expand
+    # it first or the inputs above aren't interactable yet.
+    "measurements_expand_button": "button[class*='collapsible-container__Button']:has-text('MEASUREMENTS')",
 
     "search_button": "button[type='submit'][form='classicSearchForm']",
     "result_rows": "div[class*='searchResultTable-tableRow']",
     "result_cells": ":scope > div[class*='table-col']",  # direct children only — avoids grabbing nested duplicate divs that also match 'table-col'
     "result_scroll_container": "div[class*='table-ScrollableTable'], div[id='searchResultTable-tableBody']",
 
-    "company_name": "div[class*='seller-col-new__CompanyNameRow']",
-    "cert_link": "a[href*='certificateviewer']",
-
-    # --- still TODO: verify via DevTools ---
-    "carat_min_input": "#caratMin",          # TODO: verify — text input in Size row
-    "carat_max_input": "#caratMax",          # TODO: verify
+    # Report Date only shows in the expanded row detail panel — click the
+    # row, then read this. No PDF open needed (that was the old, much
+    # slower approach — this is a plain DOM text read).
+    "expanded_report_date_value": (
+        "xpath=//div[contains(@class,'ExpandedDetailItemTitle') and "
+        "normalize-space(text())='Report Date']/following-sibling::div[1]"
+    ),
 }
 
 
 def shape_label(shape_name: str) -> str:
     """e.g. shape_label('Round') -> label[for='filter.shape.shapes.Round']"""
     return f"label[for='filter.shape.shapes.{shape_name}']"
-
-
-def size_range_label(range_text: str) -> str:
-    """e.g. size_range_label('0.30 - 0.39') -> matches preset size button"""
-    return f"label[for='{range_text}']"
 
 
 def color_label(letter: str) -> str:
@@ -81,12 +82,26 @@ def finish_quick_button(label: str) -> str:
     return f"div[class*='finish__GroupWrapper'] button:has-text('{label}')"
 
 
+# 'Show Only' toggle buttons — only Primary Suppliers confirmed so far.
+# Add more here as their 'for' values get confirmed via DevTools.
+SHOW_ONLY_FOR_MAP = {
+    "Primary Suppliers": "filter.showOnly.primarySupplierBadge",
+}
+
+
+def show_only_label(option_name: str) -> str:
+    suffix = SHOW_ONLY_FOR_MAP.get(option_name)
+    if not suffix:
+        raise ValueError(f"Unknown Show Only option '{option_name}' — selector not confirmed yet")
+    return f"label[for='{suffix}']"
+
+
 # visual column order in the results grid (from live screenshot header row)
 RESULT_COLUMNS = [
     "Seller", "Status", "Rating", "Location", "Shape", "Size", "Color",
     "Shade", "Clarity", "Cut", "Polish", "Symmetry", "Fluorescence", "Lab",
     "%Rap (Back Discount)", "$/Ct", "Total", "Info & Media", "Depth", "Table",
-    "Measurements", "Diamond Lot #", "Diamond Stock #",
+    "Measurements", "Diamond ID", "Diamond Type", "Ratio", "Verification",
 ]
 
 SHAPE_OPTIONS = ["", "Round", "Pear", "Oval", "Marquise", "Heart", "Radiant",
@@ -96,3 +111,4 @@ COLOR_OPTIONS = ["", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M"]
 CLARITY_OPTIONS = ["", "FL", "IF", "VVS1", "VVS2", "VS1", "VS2", "SI1", "SI2", "I1"]
 FLUORESCENCE_OPTIONS = ["", "None", "Very Slight", "Faint / Slight", "Medium", "Strong", "Very Strong"]
 LAB_OPTIONS = ["", "GIA", "GIA DOR", "HRD", "IGI", "AGS", "CGL", "DBIOD", "GCAL", "GHI", "GII"]
+SHOW_ONLY_OPTIONS = ["", "Primary Suppliers"]

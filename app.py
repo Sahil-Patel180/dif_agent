@@ -7,7 +7,7 @@ from scraper import run
 from excel_export import build_excel
 from config import (
     SHAPE_OPTIONS, GRADE_OPTIONS, COLOR_OPTIONS,
-    CLARITY_OPTIONS, FLUORESCENCE_OPTIONS, LAB_OPTIONS,
+    CLARITY_OPTIONS, FLUORESCENCE_OPTIONS, LAB_OPTIONS, SHOW_ONLY_OPTIONS,
 )
 
 load_dotenv()
@@ -19,37 +19,52 @@ st.subheader("Login")
 col1, col2 = st.columns(2)
 username = col1.text_input("Username", value=os.getenv("RAPAPORT_USERNAME", ""))
 password = col2.text_input("Password", value=os.getenv("RAPAPORT_PASSWORD", ""), type="password")
-company_name = st.text_input("Company Name (label for this run)")
+company_name = st.text_input("Run Label (optional, used only for the Excel filename)")
 
 st.subheader("Filters")
+
+# 1. Shape
+shape = st.selectbox("Shape", SHAPE_OPTIONS)
+
+# 2. Size (carat)
 c1, c2 = st.columns(2)
-shape = c1.selectbox("Shape", SHAPE_OPTIONS)
-finish = c2.selectbox("Finish (Cut+Pol+Sym together)", GRADE_OPTIONS)
+carat_min = c1.number_input("Carat Min", min_value=0.0, step=0.01, value=0.50)
+carat_max = c2.number_input("Carat Max", min_value=0.0, step=0.01, value=0.69)
 
-size_range = st.selectbox(
-    "Carat Range (preset)",
-    ["", "0.30 - 0.39", "0.40 - 0.49", "0.50 - 0.69", "0.70 - 0.89",
-     "0.90 - 0.99", "1.00 - 1.49", "1.50 - 1.99", "2.00 - 2.99",
-     "3.00 - 3.99", "4.00 - 4.99", "5.00 - 5.99", "6.00 - 9.99", "10.00 - 10.99"],
-)
-
+# 3. Color
 c3, c4 = st.columns(2)
 color_min = c3.selectbox("Color Min", COLOR_OPTIONS)
 color_max = c4.selectbox("Color Max", COLOR_OPTIONS)
 
+# 4. Clarity
 c5, c6 = st.columns(2)
 clarity_min = c5.selectbox("Clarity Min", CLARITY_OPTIONS)
 clarity_max = c6.selectbox("Clarity Max", CLARITY_OPTIONS)
 
+# 5. Finish
+finish = st.selectbox("Finish (Cut+Pol+Sym together)", GRADE_OPTIONS)
+
+# 6. Fluorescence
 fluorescence = st.selectbox("Fluorescence", FLUORESCENCE_OPTIONS)
+
+# 7. Grading Report
 lab = st.selectbox("Grading Report / Lab", LAB_OPTIONS)
 
-c7, c8 = st.columns(2)
-depth_min = c7.number_input("Depth% Min", min_value=0.0, max_value=100.0, value=62.0, step=0.1)
-depth_max = c8.number_input("Depth% Max", min_value=0.0, max_value=100.0, value=65.0, step=0.1)
+# 8. Show Only
+show_only = st.selectbox("Show Only", SHOW_ONLY_OPTIONS)
+
+# 9. Depth% (optional — under Measurements)
+use_depth = st.checkbox("Filter by Depth%", value=False)
+if use_depth:
+    c7, c8 = st.columns(2)
+    depth_min = c7.number_input("Depth% Min", min_value=0.0, max_value=100.0, value=62.0, step=0.1)
+    depth_max = c8.number_input("Depth% Max", min_value=0.0, max_value=100.0, value=65.0, step=0.1)
+else:
+    depth_min = depth_max = None
 
 include_report_date = st.checkbox(
-    "Fetch report date per stone (opens each cert PDF — slower)", value=False
+    "Fetch report date per stone (now a fast DOM read, not a PDF open — still adds one click per stone)",
+    value=False,
 )
 headless = st.checkbox("Run headless (uncheck first time to watch & debug selectors)", value=False)
 
@@ -59,14 +74,16 @@ if st.button("Run Search"):
     else:
         filters = {
             "shape": shape or None,
-            "size_range": size_range or None,
+            "carat_min": carat_min,
+            "carat_max": carat_max,
             "color_min": color_min or None,
             "color_max": color_max or None,
             "clarity_min": clarity_min or None,
             "clarity_max": clarity_max or None,
+            "finish": finish or None,
             "fluorescence": fluorescence or None,
             "lab": lab or None,
-            "finish": finish or None,
+            "show_only": show_only or None,
             "depth_min": depth_min,
             "depth_max": depth_max,
         }
