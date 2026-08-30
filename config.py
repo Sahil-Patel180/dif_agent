@@ -28,6 +28,9 @@ SELECTORS = {
     "carat_from_input": "input[id='filter.size.sizeFrom']",
     "carat_to_input": "input[id='filter.size.sizeTo']",
 
+    "report_date_from_input": "input[id='filter.labDateFrom']",
+    "report_date_to_input": "input[id='filter.labDateTo']",
+
     "depth_percent_from": "input[id='filter.depth.depthPercentFrom']",
     "depth_percent_to": "input[id='filter.depth.depthPercentTo']",
     # Depth% lives under the collapsed "Measurements" section — must expand

@@ -87,6 +87,7 @@ def apply_filters(page, filters: dict):
       finish: str one of '3X','EX-','VG+','VG-' — sets Cut+Pol+Sym together
       fluorescence: str (e.g. 'None')
       lab: str (e.g. 'IGI')
+      report_date_from, report_date_to: str 'MM/DD/YYYY' — Grading Report date range
       show_only: str (e.g. 'Primary Suppliers')
       depth_min, depth_max: float — depth% range
     """
@@ -124,6 +125,16 @@ def apply_filters(page, filters: dict):
     # 7. Grading Report (Lab)
     if filters.get("lab"):
         page.click(lab_label(filters["lab"]))
+
+    # 7b. Report Date range (also under Grading Report section)
+    # Real <input type="text"> (react-datepicker) — fill directly with
+    # MM/DD/YYYY text, then Escape to close any calendar popup it opens.
+    if filters.get("report_date_from"):
+        page.fill(SELECTORS["report_date_from_input"], filters["report_date_from"])
+        page.keyboard.press("Escape")
+    if filters.get("report_date_to"):
+        page.fill(SELECTORS["report_date_to_input"], filters["report_date_to"])
+        page.keyboard.press("Escape")
 
     # 8. Show Only
     if filters.get("show_only"):

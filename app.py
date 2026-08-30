@@ -50,6 +50,15 @@ fluorescence = st.selectbox("Fluorescence", FLUORESCENCE_OPTIONS)
 # 7. Grading Report
 lab = st.selectbox("Grading Report / Lab", LAB_OPTIONS)
 
+# 7b. Report Date range (optional, also under Grading Report)
+use_report_date_filter = st.checkbox("Filter by Report Date range", value=False)
+if use_report_date_filter:
+    rd1, rd2 = st.columns(2)
+    report_date_from = rd1.date_input("Report Date From")
+    report_date_to = rd2.date_input("Report Date To")
+else:
+    report_date_from = report_date_to = None
+
 # 8. Show Only
 show_only = st.selectbox("Show Only", SHOW_ONLY_OPTIONS)
 
@@ -83,6 +92,8 @@ if st.button("Run Search"):
             "finish": finish or None,
             "fluorescence": fluorescence or None,
             "lab": lab or None,
+            "report_date_from": report_date_from.strftime("%m/%d/%Y") if report_date_from else None,
+            "report_date_to": report_date_to.strftime("%m/%d/%Y") if report_date_to else None,
             "show_only": show_only or None,
             "depth_min": depth_min,
             "depth_max": depth_max,
