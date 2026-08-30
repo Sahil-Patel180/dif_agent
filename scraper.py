@@ -209,10 +209,6 @@ def collect_all_rows(page, context, expected_total: int | None = None,
         rows = page.query_selector_all(SELECTORS["result_rows"])
         new_this_round = 0
 
-    for i in range(max_iterations):
-        rows = page.query_selector_all(SELECTORS["result_rows"])
-        new_this_round = 0
-
         for row_index, row in enumerate(rows):
             record = _extract_row_record(row)
             if not record:
@@ -227,17 +223,26 @@ def collect_all_rows(page, context, expected_total: int | None = None,
                     # earlier row in THIS SAME loop re-renders the grid
                     # (expand animation), detaching handles for rows after
                     # it. Reusing the captured 'row' here was silently
-                    # failing to actually click (stale handle), which is
-                    # why dates weren't coming through.
+                    # failing to actually click (stale handle).
                     fresh_rows = page.query_selector_all(SELECTORS["result_rows"])
                     if row_index < len(fresh_rows):
-                        fresh_rows[row_index].click()
+                        target = fresh_rows[row_index]
+                        target.click()
                         page.wait_for_selector(
                             SELECTORS["expanded_detail_value"].format(label="Report Date"),
                             timeout=8000,
                         )
                         record["Report Date"] = get_expanded_detail(page, "Report Date")
                         record["Report Comment"] = get_expanded_detail(page, "Report Comment")
+
+                        # collapse it again right away — leaving rows
+                        # expanded means multiple 'Report Date' panels sit
+                        # in the DOM at once, so the next lookup can grab
+                        # the WRONG (already-open) row's value, and the
+                        # extra panel elements shift indices for rows
+                        # after this one. One row open at a time only.
+                        target.click()
+                        page.wait_for_timeout(300)
                 except Exception:
                     record["Report Date"] = None
                     record["Report Comment"] = None
