@@ -198,7 +198,11 @@ def collect_all_rows(page, context, expected_total: int | None = None,
         rows = page.query_selector_all(SELECTORS["result_rows"])
         new_this_round = 0
 
-        for row in rows:
+    for i in range(max_iterations):
+        rows = page.query_selector_all(SELECTORS["result_rows"])
+        new_this_round = 0
+
+        for row_index, row in enumerate(rows):
             record = _extract_row_record(row)
             if not record:
                 continue
@@ -208,11 +212,24 @@ def collect_all_rows(page, context, expected_total: int | None = None,
 
             if include_report_date:
                 try:
-                    row.click()
-                    page.wait_for_selector(SELECTORS["expanded_report_date_value"], timeout=5000)
-                    record["Report Date"] = get_report_date(page)
+                    # Re-query fresh right before clicking — clicking an
+                    # earlier row in THIS SAME loop re-renders the grid
+                    # (expand animation), detaching handles for rows after
+                    # it. Reusing the captured 'row' here was silently
+                    # failing to actually click (stale handle), which is
+                    # why dates weren't coming through.
+                    fresh_rows = page.query_selector_all(SELECTORS["result_rows"])
+                    if row_index < len(fresh_rows):
+                        fresh_rows[row_index].click()
+                        page.wait_for_selector(
+                            SELECTORS["expanded_detail_value"].format(label="Report Date"),
+                            timeout=8000,
+                        )
+                        record["Report Date"] = get_expanded_detail(page, "Report Date")
+                        record["Report Comment"] = get_expanded_detail(page, "Report Comment")
                 except Exception:
                     record["Report Date"] = None
+                    record["Report Comment"] = None
 
             seen[key] = record
             new_this_round += 1
@@ -269,12 +286,14 @@ def parse_company_from_seller(seller_text: str | None) -> str | None:
     return lines[-1] if lines else seller_text.strip()
 
 
-def get_report_date(page) -> str | None:
-    """Report Date is plain text sitting in the expanded row detail panel
-    (title attr, e.g. '03-31-2026') — confirmed live, no PDF open needed.
-    Caller must have already clicked the row to expand it."""
+def get_expanded_detail(page, label: str) -> str | None:
+    """Reads a field from the expanded row detail panel by its visible
+    label text (e.g. 'Report Date', 'Key to Symbols', 'Report Comment') —
+    plain DOM text/title read, confirmed live, no PDF open needed. Caller
+    must have already clicked the row to expand it."""
     try:
-        el = page.query_selector(SELECTORS["expanded_report_date_value"])
+        selector = SELECTORS["expanded_detail_value"].format(label=label)
+        el = page.query_selector(selector)
         if not el:
             return None
         return el.get_attribute("title") or el.inner_text().strip()

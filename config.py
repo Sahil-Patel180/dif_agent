@@ -39,12 +39,14 @@ SELECTORS = {
     "result_cells": ":scope > div[class*='table-col']",  # direct children only — avoids grabbing nested duplicate divs that also match 'table-col'
     "result_scroll_container": "div[class*='table-ScrollableTable'], div[id='searchResultTable-tableBody']",
 
-    # Report Date only shows in the expanded row detail panel — click the
-    # row, then read this. No PDF open needed (that was the old, much
-    # slower approach — this is a plain DOM text read).
-    "expanded_report_date_value": (
+    # Report Date / Key to Symbols / Report Comment all live in the
+    # expanded row detail panel — click the row, then read these. No PDF
+    # open needed (that was the old, much slower approach — plain DOM text
+    # reads). Template takes the visible label text and finds its sibling
+    # value div.
+    "expanded_detail_value": (
         "xpath=//div[contains(@class,'ExpandedDetailItemTitle') and "
-        "normalize-space(text())='Report Date']/following-sibling::div[1]"
+        "normalize-space(text())='{label}']/following-sibling::div[1]"
     ),
 }
 
@@ -101,8 +103,15 @@ RESULT_COLUMNS = [
     "Seller", "Status", "Rating", "Location", "Shape", "Size", "Color",
     "Shade", "Clarity", "Cut", "Polish", "Symmetry", "Fluorescence", "Lab",
     "%Rap (Back Discount)", "$/Ct", "Total", "Info & Media", "Depth", "Table",
-    "Measurements", "Diamond ID", "Diamond Type", "Ratio", "Verification",
+    "Measurements", "Diamond ID", "Diamond Type", "Ratio", "Vendor Stock #",
+    "Key to Symbols",
 ]
+
+# Extra fields only available in the expanded row detail panel (need a
+# row click to read) — Report Date, Report Comment. Key to Symbols turned
+# out to already be a normal grid column (see RESULT_COLUMNS above), no
+# click needed for that one.
+EXPANDED_DETAIL_FIELDS = ["Report Date", "Report Comment"]
 
 SHAPE_OPTIONS = ["", "Round", "Pear", "Oval", "Marquise", "Heart", "Radiant",
                   "Princess", "Emerald", "Asscher", "Sq. Emerald"]
