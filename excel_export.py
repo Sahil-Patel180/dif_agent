@@ -1,8 +1,10 @@
 """
 excel_export.py — build downloadable Excel report (Summary + Details).
-Selects + renames columns to final report format before write.
+Summary sheet gets From/To Date header rows (rows 1-2) above the table
+(row 4), matching report layout.
 """
 from io import BytesIO
+from datetime import date
 import pandas as pd
 
 SUMMARY_COLUMNS = {
@@ -39,25 +41,37 @@ DETAILS_COLUMNS = {
 
 
 def select_and_rename(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
-    """Keep only cols in mapping (skip missing), rename to final label, mapping order kept."""
     cols_present = [c for c in mapping if c in df.columns]
     return df[cols_present].rename(columns=mapping)
 
 
-def build_excel(summary_df: pd.DataFrame, df: pd.DataFrame) -> BytesIO:
-    output = BytesIO()
+def _write_summary_with_dates(writer, summary_df, report_date_from: date, report_date_to: date):
+    """Rows 1-2: From/To Date. Row 3: blank. Row 4+: table (startrow=3, 0-idx)."""
+    ws_name = "Summary"
     summary_out = select_and_rename(summary_df, SUMMARY_COLUMNS)
+    summary_out.to_excel(writer, sheet_name=ws_name, index=False, startrow=3)
+
+    ws = writer.sheets[ws_name]
+    ws["A1"] = "From Date"
+    ws["B1"] = report_date_from.strftime("%d-%m-%Y")
+    ws["A2"] = "To Date"
+    ws["B2"] = report_date_to.strftime("%d-%m-%Y")
+
+
+def build_excel(summary_df: pd.DataFrame, df: pd.DataFrame,
+                 report_date_from: date, report_date_to: date) -> BytesIO:
+    output = BytesIO()
     details_out = select_and_rename(df, DETAILS_COLUMNS)
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        summary_out.to_excel(writer, sheet_name="Summary", index=False)
+        _write_summary_with_dates(writer, summary_df, report_date_from, report_date_to)
         details_out.to_excel(writer, sheet_name="Details", index=False)
     output.seek(0)
     return output
 
 
-def save_excel(summary_df: pd.DataFrame, df: pd.DataFrame, path: str):
-    summary_out = select_and_rename(summary_df, SUMMARY_COLUMNS)
+def save_excel(summary_df: pd.DataFrame, df: pd.DataFrame, path: str,
+               report_date_from: date, report_date_to: date):
     details_out = select_and_rename(df, DETAILS_COLUMNS)
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
-        summary_out.to_excel(writer, sheet_name="Summary", index=False)
+        _write_summary_with_dates(writer, summary_df, report_date_from, report_date_to)
         details_out.to_excel(writer, sheet_name="Details", index=False)

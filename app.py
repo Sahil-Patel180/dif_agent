@@ -114,7 +114,7 @@ if st.button("Run Search"):
         st.subheader(f"Report Data ({len(df)} rows)")
         st.dataframe(select_and_rename(df, DETAILS_COLUMNS))
 
-        excel_bytes = build_excel(summary_df, df)
+        excel_bytes = build_excel(summary_df, df, report_date_from, report_date_to)
 
         st.download_button(
             "Download Excel Report",
