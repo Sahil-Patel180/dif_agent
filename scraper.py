@@ -329,13 +329,13 @@ def scrape_results(page, context, include_report_date: bool = False) -> pd.DataF
 
 
 def compute_company_summary(df: pd.DataFrame) -> pd.DataFrame:
-    """Per company: Min/Max Discount%, plus the Diamond ID of the specific
-    stone that hit each min/max (traceability back to the actual row)."""
+    """Per company: row w/ deepest discount (most negative %Rap value).
+    That row's Location, Vendor Stock #, Report Date, Key to Symbols
+    ride along as the 'Max Discount' row for the company."""
+    cols = ["Company", "Location", "Vendor Stock #", "Max Discount %",
+            "Report Date", "Key to Symbols"]
     if df.empty:
-        return pd.DataFrame(columns=[
-            "Company", "Min Discount %", "Max Discount %",
-            "Diamond ID (Min)", "Diamond ID (Max)",
-        ])
+        return pd.DataFrame(columns=cols)
 
     work = df.copy()
     disc_col = "%Rap (Back Discount)"
@@ -345,18 +345,13 @@ def compute_company_summary(df: pd.DataFrame) -> pd.DataFrame:
     )
     work = work.dropna(subset=["_Discount"])
 
-    idx_min = work.groupby("Company")["_Discount"].idxmin()
-    idx_max = work.groupby("Company")["_Discount"].idxmax()
+    idx_deepest = work.groupby("Company")["_Discount"].idxmin()  # most -ve = deepest
+    summary = work.loc[idx_deepest, [
+        "Company", "Location", "Vendor Stock #", "_Discount",
+        "Report Date", "Key to Symbols",
+    ]].rename(columns={"_Discount": "Max Discount %"})
 
-    min_rows = work.loc[idx_min, ["Company", "_Discount", "Diamond ID"]].rename(
-        columns={"_Discount": "Min Discount %", "Diamond ID": "Diamond ID (Min)"})
-    max_rows = work.loc[idx_max, ["Company", "_Discount", "Diamond ID"]].rename(
-        columns={"_Discount": "Max Discount %", "Diamond ID": "Diamond ID (Max)"})
-
-    summary = min_rows.merge(max_rows, on="Company").sort_values("Company").reset_index(drop=True)
-    summary = summary[["Company", "Min Discount %", "Diamond ID (Min)", "Max Discount %", "Diamond ID (Max)"]]
-
-    return summary
+    return summary[cols].sort_values("Company").reset_index(drop=True)
 
 
 def run(username: str, password: str, company_name: str, filters: dict,

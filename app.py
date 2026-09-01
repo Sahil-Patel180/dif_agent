@@ -10,6 +10,10 @@ from config import (
     CLARITY_OPTIONS, FLUORESCENCE_OPTIONS, LAB_OPTIONS, SHOW_ONLY_OPTIONS,
 )
 
+from datetime import date
+from dateutil.relativedelta import relativedelta
+from excel_export import build_excel, select_and_rename, SUMMARY_COLUMNS, DETAILS_COLUMNS
+
 load_dotenv()
 
 st.set_page_config(page_title="Rapaport Discount Agent", layout="centered")
@@ -50,14 +54,11 @@ fluorescence = st.selectbox("Fluorescence", FLUORESCENCE_OPTIONS)
 # 7. Grading Report
 lab = st.selectbox("Grading Report / Lab", LAB_OPTIONS)
 
-# 7b. Report Date range (optional, also under Grading Report)
-use_report_date_filter = st.checkbox("Filter by Report Date range", value=False)
-if use_report_date_filter:
-    rd1, rd2 = st.columns(2)
-    report_date_from = rd1.date_input("Report Date From")
-    report_date_to = rd2.date_input("Report Date To")
-else:
-    report_date_from = report_date_to = None
+# 7b. Report Date range — default: today -> 3 months back (per image spec)
+st.caption("Report Date range")
+rd1, rd2 = st.columns(2)
+report_date_from = rd1.date_input("From Date", value=date.today() - relativedelta(months=3))
+report_date_to = rd2.date_input("To Date", value=date.today())
 
 # 8. Show Only
 show_only = st.selectbox("Show Only", SHOW_ONLY_OPTIONS)
@@ -71,10 +72,7 @@ if use_depth:
 else:
     depth_min = depth_max = None
 
-include_report_date = st.checkbox(
-    "Fetch report date per stone (now a fast DOM read, not a PDF open — still adds one click per stone)",
-    value=False,
-)
+include_report_date = True
 headless = st.checkbox("Run headless (uncheck first time to watch & debug selectors)", value=False)
 
 if st.button("Run Search"):
@@ -102,7 +100,7 @@ if st.button("Run Search"):
             try:
                 summary_df, df = run(
                     username, password, company_name or "Unknown", filters,
-                    headless=headless, include_report_date=include_report_date,
+                    headless=headless, include_report_date=True,
                 )
             except Exception as e:
                 st.error(f"Failed: {e}")
@@ -111,10 +109,10 @@ if st.button("Run Search"):
                 st.stop()
 
         st.subheader("Summary (per company)")
-        st.dataframe(summary_df)
+        st.dataframe(select_and_rename(summary_df, SUMMARY_COLUMNS))
 
         st.subheader(f"Report Data ({len(df)} rows)")
-        st.dataframe(df)
+        st.dataframe(select_and_rename(df, DETAILS_COLUMNS))
 
         excel_bytes = build_excel(summary_df, df)
 
