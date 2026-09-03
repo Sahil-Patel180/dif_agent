@@ -20,6 +20,22 @@ def click_option_near_label(driver, label_text, value, timeout=10):
     ).click()
 
 
+def click_option_by_box_id(driver, box_id_prefix, value, timeout=10):
+    """Cut/Polish/Symmetry live in one shared 'Finishing' panel — confirmed real DOM ids
+    are {prefix}LabelBox / {prefix}ComponentBox (e.g. cutComponentBox). Scoping the click
+    to that box id avoids grabbing the wrong sibling's chip via document-order 'following::'.
+    """
+    xpath = f"//div[@id='{box_id_prefix}ComponentBox']//div[@aria-label='{value}']"
+    WebDriverWait(driver, timeout).until(
+        EC.element_to_be_clickable((By.XPATH, xpath))
+    ).click()
+
+
+# keys here confirmed/likely to share the Finishing sub-panel DOM pattern (LabelBox/ComponentBox by id)
+# cut confirmed from live DOM inspection; polish/symmetry assumed same naming convention — verify if they still fail
+SRK_BOX_ID_KEYS = {"cut": "cut", "polish": "polish", "symmetry": "symmetry"}
+
+
 def apply_shape(driver, shape: str, timeout=10):
     xpath = f"//span[@class='shape-label' and text()='{shape}']/ancestor::a"
     WebDriverWait(driver, timeout).until(
@@ -56,15 +72,23 @@ def apply_filters(driver, filters: dict):
     total_depth_from, total_depth_to
     """
     if filters.get("shape"):
+        print(f"[srk] applying shape={filters['shape']}")
         apply_shape(driver, filters["shape"])
 
+    print("[srk] applying carat range")
     apply_carat_range(driver, filters.get("carat_from"), filters.get("carat_to"))
+    print("[srk] applying total depth range")
     apply_total_depth_range(driver, filters.get("total_depth_from"), filters.get("total_depth_to"))
 
     for key, label in SRK_FILTER_LABELS.items():
         val = filters.get(key)
         if val:
-            click_option_near_label(driver, label, val)
+            print(f"[srk] clicking {key}={val} (label={label})")
+            if key in SRK_BOX_ID_KEYS:
+                click_option_by_box_id(driver, SRK_BOX_ID_KEYS[key], val)
+            else:
+                click_option_near_label(driver, label, val)
+            print(f"[srk] window handles alive: {driver.window_handles}")
 
 
 def run_search(driver, timeout=15):

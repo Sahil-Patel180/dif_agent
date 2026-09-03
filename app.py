@@ -1,6 +1,7 @@
 import os
 import streamlit as st
 import pandas as pd
+import traceback
 from dotenv import load_dotenv
 
 from scraper import run
@@ -15,8 +16,34 @@ from dateutil.relativedelta import relativedelta
 from excel_export import build_excel, select_and_rename, SUMMARY_COLUMNS, DETAILS_COLUMNS
 
 from srk_scraper import run as run_srk
+import undetected_chromedriver as uc
+import traceback
 
 load_dotenv()
+
+# TODO verify: add SRK_LOGIN_URL to config.py (login page URL, not search URL)
+try:
+    from config import SRK_LOGIN_URL
+except ImportError:
+    SRK_LOGIN_URL = "https://pure.srk.one/login"  # placeholder, verify real path
+
+
+def build_manual_login_driver():
+    """Visible Chrome window — site has captcha, login must be done by hand.
+    undetected_chromedriver patches automation signals. On top of that, the site
+    also loads assets/js/disable-devtool.min.js which shows a blocking overlay —
+    block that request outright via CDP so it never runs.
+    """
+    opts = uc.ChromeOptions()
+    opts.add_argument("--start-maximized")
+    opts.add_argument("--no-first-run")
+    opts.add_argument("--no-default-browser-check")
+    opts.page_load_strategy = "eager"  # don't wait for full page load, just DOM ready
+    driver = uc.Chrome(options=opts, log_level=0)
+    driver.set_page_load_timeout(60)
+    driver.execute_cdp_cmd("Network.enable", {})
+    driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": ["*disable-devtool*"]})
+    return driver
 
 st.set_page_config(page_title="Rapaport Discount Agent", layout="centered")
 st.title("Rapaport Discount % Agent")
@@ -155,11 +182,26 @@ elif platform == "SRK":
     total_depth_max = c4.number_input("Total Depth Max", min_value=0.0, max_value=100.0, value=0.0, step=0.1)
 
     fetch_video = st.checkbox("Fetch video link URL (slower — opens new tab per row)", value=True)
-    headless = st.checkbox("Run headless (uncheck first time to watch & debug selectors)", value=False)
 
-    if st.button("Run Search"):
-        if not username or not password:
-            st.error("Enter username and password.")
+    st.caption("Site has captcha → login done by hand in a real browser window. Headless not possible.")
+
+    col_a, col_b = st.columns(2)
+
+    if col_a.button("1. Open Browser & Login"):
+        if "srk_driver" in st.session_state:
+            try:
+                st.session_state.srk_driver.quit()
+            except Exception:
+                pass
+        st.session_state.srk_driver = build_manual_login_driver()
+        st.session_state.srk_driver.get(SRK_LOGIN_URL)
+        st.info("Browser window opened. Log in + solve captcha there, then click step 2 below.")
+
+    run_clicked = col_b.button("2. I've Logged In → Run Search")
+
+    if run_clicked:
+        if "srk_driver" not in st.session_state:
+            st.error("Click 'Open Browser & Login' first.")
         else:
             filters = {
                 "shape": shape or None,
@@ -177,15 +219,21 @@ elif platform == "SRK":
                 "total_depth_from": total_depth_min or None,
                 "total_depth_to": total_depth_max or None,
             }
-            with st.spinner("Logging in and fetching results..."):
+            with st.spinner("Fetching results..."):
                 try:
-                    srk_df = run_srk(username, password, filters,
-                                      headless=headless, fetch_video=fetch_video)
+                    srk_df = run_srk(st.session_state.srk_driver, filters, fetch_video=fetch_video)
                 except Exception as e:
+                    traceback.print_exc()  # full stack -> terminal, read this not the red box
                     st.error(f"Failed: {e}")
-                    st.info("Most likely a selector in srk_scraper.py doesn't match the live page yet. "
-                             "Uncheck 'Run headless' and re-run to watch the browser and fix selectors.")
+                    st.info("Most likely a selector in srk_scraper.py doesn't match the live page yet "
+                             "(login page selectors + search page selectors both unverified — check with browser open).")
                     st.stop()
+                finally:
+                    try:
+                        st.session_state.srk_driver.quit()
+                    except Exception:
+                        pass
+                    del st.session_state.srk_driver
 
             st.subheader(f"SRK Results ({len(srk_df)} rows)")
             st.dataframe(srk_df)
