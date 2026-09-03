@@ -124,3 +124,44 @@ CLARITY_OPTIONS = ["", "FL", "IF", "VVS1", "VVS2", "VS1", "VS2", "SI1", "SI2", "
 FLUORESCENCE_OPTIONS = ["", "None", "Very Slight", "Faint / Slight", "Medium", "Strong", "Very Strong"]
 LAB_OPTIONS = ["", "GIA", "GIA DOR", "HRD", "IGI", "AGS", "CGL", "DBIOD", "GCAL", "GHI", "GII"]
 SHOW_ONLY_OPTIONS = ["", "Primary Suppliers"]
+
+SRK_SEARCH_URL = "https://pure.srk.one/web/search/specific-search"
+
+SRK_FILTER_LABELS = {
+    "clarity": "Clarity",
+    "colour": "Colour",
+    "cut": "Cut",
+    "polish": "Polish",
+    "symmetry": "Symmetry",
+    "fluorescence": "Fluorescence",
+    "lab": "Certificate",
+    "luster": "Luster",
+    "shade": "Shades",
+}
+
+SRK_RESULT_COLUMNS = [
+    "Sr No.", "Shape", "Carat", "Clarity", "Colour", "Shade", "Cut",
+    "Polish", "Symmetry", "Fluorescence", "Luster", "Lab", "Total Depth",
+    "SGS Comment", "Discount (Off%)", "Stone ID", "Video Link URL",
+    "Key to Symbol", "Lab Comment",
+]
+
+# scraped-table-header -> our-output-column
+SRK_COLUMN_MAP = {
+    "Shape": "Shape",
+    "Carat": "Carat",
+    "Clarity": "Clarity",
+    "Color": "Colour",
+    "Shd": "Shade",
+    "Cut": "Cut",
+    "Pol": "Polish",
+    "Sym": "Symmetry",
+    "Fluor": "Fluorescence",
+    "Lust": "Luster",
+    "Cert": "Lab",
+    "TD": "Total Depth",
+    "SGS Comment": "SGS Comment",
+    "Off%": "Discount (Off%)",
+    "Key To Symbol": "Key to Symbol",
+    "LAB Comments": "Lab Comment",
+}
