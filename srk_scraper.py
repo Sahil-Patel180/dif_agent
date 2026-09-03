@@ -33,7 +33,21 @@ def click_option_by_box_id(driver, box_id_prefix, value, timeout=10):
 
 # keys here confirmed/likely to share the Finishing sub-panel DOM pattern (LabelBox/ComponentBox by id)
 # cut confirmed from live DOM inspection; polish/symmetry assumed same naming convention — verify if they still fail
+# cut/polish/symmetry: wrapper ComponentBox id confirmed reliable
 SRK_BOX_ID_KEYS = {"cut": "cut", "polish": "polish", "symmetry": "symmetry"}
+
+
+def click_option_by_selectbutton_id(driver, selectbutton_id, value, timeout=10):
+    """Luster/Shades: outer wrapper id is buggy on the site (leftover 'cutshingComponentBox'
+    id reused from Cut), but the inner <p-selectbutton id="..."> widget id is clean and unique.
+    """
+    xpath = f"//p-selectbutton[@id='{selectbutton_id}']//div[@aria-label='{value}']"
+    WebDriverWait(driver, timeout).until(
+        EC.element_to_be_clickable((By.XPATH, xpath))
+    ).click()
+
+
+SRK_SELECTBUTTON_ID_KEYS = {"luster": "lusterMultiselect", "shade": "shadeMultiselect"}
 
 
 def apply_shape(driver, shape: str, timeout=10):
@@ -84,7 +98,9 @@ def apply_filters(driver, filters: dict):
         val = filters.get(key)
         if val:
             print(f"[srk] clicking {key}={val} (label={label})")
-            if key in SRK_BOX_ID_KEYS:
+            if key in SRK_SELECTBUTTON_ID_KEYS:
+                click_option_by_selectbutton_id(driver, SRK_SELECTBUTTON_ID_KEYS[key], val)
+            elif key in SRK_BOX_ID_KEYS:
                 click_option_by_box_id(driver, SRK_BOX_ID_KEYS[key], val)
             else:
                 click_option_near_label(driver, label, val)
