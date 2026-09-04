@@ -116,19 +116,32 @@ def run_search(driver, timeout=15):
 
 
 def get_video_link(driver, row_element, timeout=10):
-    """Hover diamond-details icon, click 'HD Movie', grab URL from new tab, close it."""
-    icon = row_element.find_element(
-        By.XPATH, ".//a[@ng-reflect-dir-stone-multimedia-detail]"
-    )
-    ActionChains(driver).move_to_element(icon).perform()
-
-    hd_movie = WebDriverWait(driver, timeout).until(
-        EC.element_to_be_clickable(
-            (By.XPATH, ".//span[contains(text(),'HD Movie')]/ancestor::a[1]")
+    """Click row's diamond-details icon to open the shared overlay menu (id='mediaIconOverlay',
+    positioned absolutely, lives OUTSIDE the row/table — a singleton reused+repositioned per
+    click), then click 'HD Movie' inside that overlay, grab URL from new tab, close it.
+    """
+    try:
+        icon = row_element.find_element(
+            By.XPATH, ".//span[contains(@class,'grid-icon') and contains(@class,'icon-media')]"
         )
-    )
-    main_window = driver.current_window_handle
-    hd_movie.click()
+    except Exception:
+        print("[srk] no video icon on this row, skipping")
+        return ""
+    try:
+        icon.click()
+
+        hd_movie = WebDriverWait(driver, timeout).until(
+            EC.element_to_be_clickable((
+                By.XPATH,
+                "//div[@id='mediaIconOverlay']//span[contains(@class,'dtl-icon-text') "
+                "and normalize-space(text())='HD Movie']/ancestor::a[1]",
+            ))
+        )
+        main_window = driver.current_window_handle
+        hd_movie.click()
+    except Exception:
+        print("[srk] video icon found but hover/click flow failed, skipping")
+        return ""
 
     try:
         WebDriverWait(driver, timeout).until(lambda d: len(d.window_handles) > 1)
@@ -143,27 +156,71 @@ def get_video_link(driver, row_element, timeout=10):
     return video_url
 
 
+# aria-describedby on each <igx-grid-cell> looks like "igx-grid-1_shape_key" — the part
+# after the first underscore is a stable field id, confirmed live from DOM. Far more
+# reliable than matching header text against a real <table> that doesn't exist here —
+# this is an Angular Ignite UI grid (<igx-grid-cell> divs with role=gridcell), not a
+# literal HTML table. TD (Total Depth) field id unconfirmed — check live DOM if it stays blank.
+SRK_FIELD_KEY_TO_HEADER = {
+    "product_name": "Stone ID",
+    "shape_key": "Shape",
+    "carat": "Carat",
+    "clarity_key": "Clarity",
+    "color_key": "Color",
+    "certificate_key": "Cert",
+    "rap_off_display": "Off%",
+    "cut_key": "Cut",
+    "polish_key": "Pol",
+    "symmetry_key": "Sym",
+    "fluor_key": "Fluor",
+    "shade_key": "Shd",
+    "luster_key": "Lust",
+    "sgs": "SGS Comment",
+    "kts": "Key To Symbol",
+    "lab_comment": "LAB Comments",
+}
+
+
 def parse_results(driver, fetch_video=True, timeout=15):
     WebDriverWait(driver, timeout).until(
-        EC.presence_of_element_located((By.CSS_SELECTOR, "table"))
+        EC.presence_of_element_located((By.TAG_NAME, "igx-grid-cell"))
     )
-    headers = [th.text.strip() for th in driver.find_elements(By.CSS_SELECTOR, "table th")]
-    rows = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
+    cells = driver.find_elements(By.TAG_NAME, "igx-grid-cell")
+    print(f"[srk] found {len(cells)} igx-grid-cell elements")
+
+    rows_data = {}   # rowindex -> {our_header: text}
+    row_anchor = {}  # rowindex -> one cell, used to locate the row for video-link lookup
+
+    for c in cells:
+        rowindex = c.get_attribute("data-rowindex")
+        if rowindex is None:
+            continue
+        described = c.get_attribute("aria-describedby") or ""
+        field_key = described.split("_", 1)[1] if "_" in described else described
+        header = SRK_FIELD_KEY_TO_HEADER.get(field_key)
+        if not header:
+            continue
+        rows_data.setdefault(rowindex, {})[header] = c.text.strip()
+        row_anchor.setdefault(rowindex, c)
 
     records = []
-    for i, row in enumerate(rows, start=1):
-        cells = row.find_elements(By.TAG_NAME, "td")
-        raw = {}
-        for h, c in zip(headers, cells):
-            raw[h] = c.text.strip()
-
-        stone_id = raw.get("Diamond Details", "").split("\n")[0].strip()
+    for i, rowindex in enumerate(sorted(rows_data.keys(), key=int), start=1):
+        raw = rows_data[rowindex]
+        stone_id = raw.pop("Stone ID", "")
 
         rec = {"Sr No.": i, "Stone ID": stone_id}
         for src_col, out_col in SRK_COLUMN_MAP.items():
             rec[out_col] = raw.get(src_col, "")
 
-        rec["Video Link URL"] = get_video_link(driver, row) if fetch_video else ""
+        if fetch_video:
+            try:
+                row_el = row_anchor[rowindex].find_element(By.XPATH, "./ancestor::*[@role='row'][1]")
+            except Exception:
+                row_el = row_anchor[rowindex]
+            rec["Video Link URL"] = get_video_link(driver, row_el)
+        else:
+            rec["Video Link URL"] = ""
+
         records.append(rec)
 
     df = pd.DataFrame(records)
