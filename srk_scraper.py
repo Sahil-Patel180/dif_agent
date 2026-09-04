@@ -222,7 +222,13 @@ def parse_results(driver, fetch_video=True, timeout=15):
             if not header:
                 continue
             # first-seen wins — value doesn't change between scroll positions, just avoid overwrite
-            text = c.text.strip()
+            if header == "Stone ID":
+                try:
+                    text = c.find_element(By.CSS_SELECTOR, "a.stoneid-text").text.strip()
+                except Exception:
+                    text = ""
+            else:
+                text = c.text.strip()
             row_dict = rows_data.setdefault(rowindex, {})
             if text:  # never let a blank/mid-render scan overwrite or block a real value
                 row_dict[header] = text
