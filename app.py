@@ -1,7 +1,9 @@
 import os
+import io
 import streamlit as st
 import pandas as pd
 import traceback
+from openpyxl.styles import Font
 from dotenv import load_dotenv
 
 from scraper import run
@@ -238,10 +240,20 @@ elif platform == "SRK":
             st.subheader(f"SRK Results ({len(srk_df)} rows)")
             st.dataframe(srk_df)
 
-            csv_bytes = srk_df.to_csv(index=False).encode("utf-8")
+            excel_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+                srk_df.to_excel(writer, index=False, sheet_name="SRK Results")
+                ws = writer.sheets["SRK Results"]
+                for row in ws.iter_rows():
+                    for cell in row:
+                        cell.font = Font(name="Arial", bold=(cell.row == 1))
+                for col_cells in ws.columns:
+                    width = max(len(str(c.value)) if c.value is not None else 0 for c in col_cells) + 2
+                    ws.column_dimensions[col_cells[0].column_letter].width = min(width, 40)
+
             st.download_button(
-                "Download CSV",
-                data=csv_bytes,
-                file_name=f"srk_report_{(company_name or 'company').replace(' ', '_')}.csv",
-                mime="text/csv",
+                "Download Excel Report",
+                data=excel_buffer.getvalue(),
+                file_name=f"srk_report_{(company_name or 'company').replace(' ', '_')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
