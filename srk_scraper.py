@@ -168,6 +168,7 @@ SRK_FIELD_KEY_TO_HEADER = {
     "clarity_key": "Clarity",
     "color_key": "Color",
     "certificate_key": "Cert",
+    "total_depth_percent": "TD",
     "rap_off_display": "Off%",
     "cut_key": "Cut",
     "polish_key": "Pol",
@@ -181,27 +182,65 @@ SRK_FIELD_KEY_TO_HEADER = {
 }
 
 
+def _find_horizontal_scroller(driver):
+    """Walk up from a cell until we find the element that actually scrolls horizontally."""
+    return driver.execute_script("""
+        const cell = document.querySelector('igx-grid-cell');
+        if (!cell) return null;
+        let el = cell;
+        while (el) {
+            if (el.scrollWidth > el.clientWidth + 5) return el;
+            el = el.parentElement;
+        }
+        return null;
+    """)
+
+
 def parse_results(driver, fetch_video=True, timeout=15):
     WebDriverWait(driver, timeout).until(
         EC.presence_of_element_located((By.TAG_NAME, "igx-grid-cell"))
     )
-    cells = driver.find_elements(By.TAG_NAME, "igx-grid-cell")
-    print(f"[srk] found {len(cells)} igx-grid-cell elements")
 
     rows_data = {}   # rowindex -> {our_header: text}
     row_anchor = {}  # rowindex -> one cell, used to locate the row for video-link lookup
 
-    for c in cells:
-        rowindex = c.get_attribute("data-rowindex")
-        if rowindex is None:
-            continue
-        described = c.get_attribute("aria-describedby") or ""
-        field_key = described.split("_", 1)[1] if "_" in described else described
-        header = SRK_FIELD_KEY_TO_HEADER.get(field_key)
-        if not header:
-            continue
-        rows_data.setdefault(rowindex, {})[header] = c.text.strip()
-        row_anchor.setdefault(rowindex, c)
+    def scan_once():
+        cells = driver.find_elements(By.TAG_NAME, "igx-grid-cell")
+        for c in cells:
+            rowindex = c.get_attribute("data-rowindex")
+            if rowindex is None:
+                continue
+            described = c.get_attribute("aria-describedby") or ""
+            field_key = described.split("_", 1)[1] if "_" in described else described
+            header = SRK_FIELD_KEY_TO_HEADER.get(field_key)
+            if not header:
+                continue
+            # first-seen wins — value doesn't change between scroll positions, just avoid overwrite
+            rows_data.setdefault(rowindex, {}).setdefault(header, c.text.strip())
+            row_anchor.setdefault(rowindex, c)
+        return len(cells)
+
+    n = scan_once()
+    print(f"[srk] scroll pos 0: found {n} igx-grid-cell elements")
+
+    # grid virtualizes columns horizontally — TD/SGS/KTS/LabComment (far right) only exist
+    # in DOM once scrolled into view. Scroll the grid body in steps, re-scanning each time.
+    scroller = _find_horizontal_scroller(driver)
+    if scroller:
+        max_scroll = driver.execute_script(
+            "return arguments[0].scrollWidth - arguments[0].clientWidth;", scroller
+        )
+        step = 300
+        pos = 0
+        while pos < max_scroll:
+            pos = min(pos + step, max_scroll)
+            driver.execute_script("arguments[0].scrollLeft = arguments[1];", scroller, pos)
+            time.sleep(0.3)  # let Angular render the newly-virtualized cells
+            n = scan_once()
+            print(f"[srk] scroll pos {pos}/{max_scroll}: found {n} igx-grid-cell elements")
+        driver.execute_script("arguments[0].scrollLeft = 0;", scroller)
+    else:
+        print("[srk] no horizontal scroller found — some far-right columns may stay blank")
 
     records = []
     for i, rowindex in enumerate(sorted(rows_data.keys(), key=int), start=1):
