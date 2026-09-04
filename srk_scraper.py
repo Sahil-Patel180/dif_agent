@@ -107,12 +107,53 @@ def apply_filters(driver, filters: dict):
             print(f"[srk] window handles alive: {driver.window_handles}")
 
 
-def run_search(driver, timeout=15):
+def open_modify_search(driver, timeout=10):
+    """Click 'Modify Search' icon on the result page — opens filter panel back up
+    WITHOUT navigating away / reloading. Confirmed real DOM: span#filter with class
+    'modify-search-icon', wrapped in an <a>.
+    """
+    xpath = "//span[@id='filter' and contains(@class,'modify-search-icon')]/ancestor::a[1]"
+    WebDriverWait(driver, timeout).until(
+        EC.element_to_be_clickable((By.XPATH, xpath))
+    ).click()
+
+
+def reset_search(driver, timeout=10):
+    """Inside the reopened filter panel, clear every filter left over from the
+    previous input set before applying the next one. Confirmed real DOM: same
+    id='searchBtn' as the final submit button, text reads 'Reset Search' in this state.
+    """
+    xpath = "//button[@id='searchBtn' and contains(normalize-space(.),'Reset')]"
+    WebDriverWait(driver, timeout).until(
+        EC.element_to_be_clickable((By.XPATH, xpath))
+    ).click()
+
+
+def run_search(driver, timeout=15, wait_for_new_results=False):
+    """wait_for_new_results=True: used from the modify-search flow, where the URL
+    never changes (still /search-result from the previous run) so url_contains is
+    a no-op check. Instead, grab a cell that belongs to the OLD result set before
+    clicking, then wait for it to go stale — that's the real signal new data landed.
+    """
+    old_cell = None
+    if wait_for_new_results:
+        try:
+            old_cell = driver.find_element(By.TAG_NAME, "igx-grid-cell")
+        except Exception:
+            old_cell = None
+
     btn = WebDriverWait(driver, timeout).until(
         EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(text())='Search']"))
     )
     btn.click()
-    WebDriverWait(driver, timeout).until(EC.url_contains("search-result"))
+
+    if wait_for_new_results and old_cell is not None:
+        try:
+            WebDriverWait(driver, timeout).until(EC.staleness_of(old_cell))
+        except Exception:
+            pass  # grid may re-use DOM nodes in place; fall through, scan will still run
+    else:
+        WebDriverWait(driver, timeout).until(EC.url_contains("search-result"))
 
 
 def get_video_link(driver, row_element, timeout=10):
@@ -202,7 +243,40 @@ def _find_horizontal_scroller(driver):
     """)
 
 
-def parse_results(driver, fetch_video=True, timeout=15):
+def _find_vertical_scroller(driver):
+    """Row virtualization equiv of the horizontal one above — hidden helper div,
+    class containing 'vhelper--vertical'. Fallback walks up checking scrollHeight
+    instead of scrollWidth.
+    """
+    return driver.execute_script("""
+        let vv = document.querySelector('[class*="vhelper--vertical"]');
+        if (vv && vv.scrollHeight > vv.clientHeight) return vv;
+
+        const cell = document.querySelector('igx-grid-cell');
+        let el = cell;
+        while (el) {
+            if (el.scrollHeight > el.clientHeight + 5) return el;
+            el = el.parentElement;
+        }
+        return null;
+    """)
+
+
+def _get_row_height(driver, default=40):
+    h = driver.execute_script("""
+        const c = document.querySelector('igx-grid-cell');
+        return c ? c.getBoundingClientRect().height : 0;
+    """)
+    return h if h and h > 5 else default
+
+
+def scan_full_grid(driver, timeout=15):
+    """Row AND column virtualization both active on this grid — a cell only exists in
+    DOM once its row is vertically in view AND its column is horizontally in view.
+    So: outer loop = vertical (rows), inner loop = full horizontal sweep at each
+    vertical stop. rows_data/row_anchor persist across every stop -> merges into one
+    complete set regardless of scan order (first-non-blank-wins per cell).
+    """
     WebDriverWait(driver, timeout).until(
         EC.presence_of_element_located((By.TAG_NAME, "igx-grid-cell"))
     )
@@ -221,7 +295,6 @@ def parse_results(driver, fetch_video=True, timeout=15):
             header = SRK_FIELD_KEY_TO_HEADER.get(field_key)
             if not header:
                 continue
-            # first-seen wins — value doesn't change between scroll positions, just avoid overwrite
             if header == "Stone ID":
                 try:
                     text = c.find_element(By.CSS_SELECTOR, "a.stoneid-text").text.strip()
@@ -237,31 +310,73 @@ def parse_results(driver, fetch_video=True, timeout=15):
             row_anchor.setdefault(rowindex, c)
         return len(cells)
 
-    n = scan_once()
-    print(f"[srk] scroll pos 0: found {n} igx-grid-cell elements")
+    h_scroller = _find_horizontal_scroller(driver)
+    v_scroller = _find_vertical_scroller(driver)
 
-    # grid virtualizes columns horizontally — TD/SGS/KTS/LabComment (far right) only exist
-    # in DOM once scrolled into view. Scroll the grid body in steps, re-scanning each time.
-    scroller = _find_horizontal_scroller(driver)
-    if scroller:
-        max_scroll = driver.execute_script(
-            "return arguments[0].scrollWidth - arguments[0].clientWidth;", scroller
+    def horizontal_sweep(tag):
+        n = scan_once()
+        print(f"[srk] {tag} h-pos 0: {n} cells, {len(rows_data)} rows so far")
+        if not h_scroller:
+            return
+        max_h = driver.execute_script(
+            "return arguments[0].scrollWidth - arguments[0].clientWidth;", h_scroller
         )
-        step = 100  # narrow virtualization buffer — 300px let some columns slip through the gap
+        step = 100  # narrow buffer — wider step let columns slip through the gap before
         pos = 0
-        while pos < max_scroll:
-            pos = min(pos + step, max_scroll)
+        while pos < max_h:
+            pos = min(pos + step, max_h)
             driver.execute_script(
                 "arguments[0].scrollLeft = arguments[1]; "
                 "arguments[0].dispatchEvent(new Event('scroll'));",
-                scroller, pos,
+                h_scroller, pos,
             )
-            time.sleep(0.4)  # let Angular render the newly-virtualized cells
+            time.sleep(0.35)
             n = scan_once()
-            print(f"[srk] scroll pos {pos}/{max_scroll}: found {n} igx-grid-cell elements")
-        driver.execute_script("arguments[0].scrollLeft = 0;", scroller)
+            print(f"[srk] {tag} h-pos {pos}/{max_h}: {n} cells, {len(rows_data)} rows so far")
+        driver.execute_script(
+            "arguments[0].scrollLeft = 0; arguments[0].dispatchEvent(new Event('scroll'));",
+            h_scroller,
+        )
+        time.sleep(0.2)
+
+    if v_scroller:
+        driver.execute_script(
+            "arguments[0].scrollTop = 0; arguments[0].dispatchEvent(new Event('scroll'));",
+            v_scroller,
+        )
+        time.sleep(0.3)
+
+    horizontal_sweep("v-pos 0")
+
+    if v_scroller:
+        max_v = driver.execute_script(
+            "return arguments[0].scrollHeight - arguments[0].clientHeight;", v_scroller
+        )
+        row_h = _get_row_height(driver)
+        step = max(int(row_h * 0.8), 20)  # <1 row per step, overlap so no row gets skipped
+        pos = 0
+        while pos < max_v:
+            pos = min(pos + step, max_v)
+            driver.execute_script(
+                "arguments[0].scrollTop = arguments[1]; "
+                "arguments[0].dispatchEvent(new Event('scroll'));",
+                v_scroller, pos,
+            )
+            time.sleep(0.35)
+            horizontal_sweep(f"v-pos {pos}/{max_v}")
+        driver.execute_script(
+            "arguments[0].scrollTop = 0; arguments[0].dispatchEvent(new Event('scroll'));",
+            v_scroller,
+        )
     else:
-        print("[srk] no horizontal scroller found — some far-right columns may stay blank")
+        print("[srk] no vertical scroller found — grid may be single-page, or rows beyond viewport missed")
+
+    print(f"[srk] scan done: {len(rows_data)} total rows")
+    return rows_data, row_anchor
+
+
+def parse_results(driver, fetch_video=True, timeout=15):
+    rows_data, row_anchor = scan_full_grid(driver, timeout=timeout)
 
     records = []
     for i, rowindex in enumerate(sorted(rows_data.keys(), key=int), start=1):
@@ -287,9 +402,173 @@ def parse_results(driver, fetch_video=True, timeout=15):
     return df[SRK_RESULT_COLUMNS]
 
 
-def run(driver, filters: dict, fetch_video=True):
-    """Assumes driver already logged in / session active on pure.srk.one."""
-    driver.get(SRK_SEARCH_URL)
+def _reassert_devtool_block(driver):
+    """Site's anti-automation 'please close devtool' overlay-blocker only sticks for
+    the page load it was set on — must re-poke it after every driver.get(), or it
+    creeps back in and starts eating clicks a few navigations in (root cause of the
+    bulk run dying at the same step every row).
+    """
+    try:
+        driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": ["*disable-devtool*"]})
+    except Exception:
+        pass
+
+
+def run(driver, filters: dict, fetch_video=True, fresh_nav=True):
+    """Assumes driver already logged in / session active on pure.srk.one.
+    fresh_nav=True: normal single-search path — full driver.get(SRK_SEARCH_URL).
+    fresh_nav=False: bulk path after row 1 — stay on the result page, click
+    'Modify Search' + 'Reset Search' instead of reloading (no full page nav, so
+    no fresh 'please close devtool' race, and much faster than a full reload).
+    """
+    if fresh_nav:
+        driver.get(SRK_SEARCH_URL)
+        _reassert_devtool_block(driver)
+    else:
+        open_modify_search(driver)
+        reset_search(driver)
+
     apply_filters(driver, filters)
-    run_search(driver)
+    run_search(driver, wait_for_new_results=not fresh_nav)
     return parse_results(driver, fetch_video=fetch_video)
+
+
+# ---- bulk (multi-input-set) support -----------------------------------------
+
+SHAPE_ABBR = {
+    "RD": "Round", "OV": "Oval", "PS": "Pear", "EM": "Emerald", "LR": "L Radiant",
+    "PR": "Princess", "SE": "Sq Emerald", "HT": "Heart", "MQ": "Marquise",
+    "CU": "Cushion", "CP": "Cu Plasma", "TR": "Triangular",
+}
+LUSTER_ABBR = {
+    "EX": "Excellent", "VG": "Very Good", "G": "Good",
+    "SM": "Slight Milky", "MM": "Medium Milky", "HM": "Heavy Milky",
+}
+FLUOR_ABBR = {
+    "NONE": "None", "NIL": "None", "FA": "Faint", "FNT": "Faint",
+    "MD": "Medium", "MED": "Medium", "ST": "Strong", "STG": "Strong",
+    "VST": "Very Strong", "MD-BL": "Medium", "BL": "Strong",
+}
+
+
+def _clean(v):
+    """Strip pandas NaN / blank cells -> None. Never returns literal 'nan' string."""
+    if v is None:
+        return None
+    if isinstance(v, float) and pd.isna(v):
+        return None
+    s = str(v).strip()
+    if s == "" or s.lower() == "nan":
+        return None
+    return s
+
+
+def _get_col(row, *names):
+    """Try several header spellings — 'CARAT From' vs 'CARAT(From)' etc — first match wins."""
+    for n in names:
+        if n in row:
+            v = row.get(n)
+            if _clean(v) is not None:
+                return v
+    return None
+
+
+def bulk_row_to_filters(row) -> dict:
+    """One row of agent_srk_bulkinput.xlsx -> filters dict for run().
+    Expected cols: SHAPE, CARAT From/CARAT(From), CARAT To/CARAT(To), CLARITY,
+    COLOUR, SHADE, CUT, POLISH, SYMMETRY, FLUORESCENCE, LUSTER, LAB,
+    TOTAL DEPTH From/TOTAL DEPTH(From), TOTAL DEPTH To/TOTAL DEPTH(To).
+    Single CARAT/TOTAL DEPTH cols and 'video Link' col ignored.
+    """
+    shape = _clean(row.get("SHAPE"))
+    if shape:
+        shape = SHAPE_ABBR.get(shape.upper(), shape)
+
+    luster = _clean(row.get("LUSTER"))
+    if luster:
+        luster = LUSTER_ABBR.get(luster.upper(), luster)
+
+    fluor = _clean(row.get("FLUORESCENCE"))
+    if fluor:
+        fluor = FLUOR_ABBR.get(fluor.upper(), fluor)
+
+    def _num(v):
+        v = _clean(v)
+        return float(v) if v is not None else None
+
+    return {
+        "shape": shape,
+        "carat_from": _num(_get_col(row, "CARAT From", "CARAT(From)")),
+        "carat_to": _num(_get_col(row, "CARAT To", "CARAT(To)")),
+        "clarity": _clean(row.get("CLARITY")),
+        "colour": _clean(row.get("COLOUR")),
+        "shade": _clean(row.get("SHADE")),
+        "cut": _clean(row.get("CUT")),
+        "polish": _clean(row.get("POLISH")),
+        "symmetry": _clean(row.get("SYMMETRY")),
+        "fluorescence": fluor,
+        "luster": luster,
+        "lab": _clean(row.get("LAB")),
+        "total_depth_from": _num(_get_col(row, "TOTAL DEPTH From", "TOTAL DEPTH(From)")),
+        "total_depth_to": _num(_get_col(row, "TOTAL DEPTH To", "TOTAL DEPTH(To)")),
+    }
+
+
+def _driver_alive(driver) -> bool:
+    try:
+        _ = driver.title
+        return True
+    except Exception:
+        return False
+
+
+def run_bulk(driver, bulk_df: "pd.DataFrame", progress_cb=None):
+    """Sequential: input set 1 -> search -> full scroll-scan -> back to input page
+    -> input set 2 -> ... Stacks all results into one ALL df, echoes inputs into
+    an INPUTS df. Retries a row once on error; stops early (doesn't crash the rest)
+    if the browser itself dies mid-run.
+    Returns (inputs_df, all_df).
+    """
+    all_frames = []
+    input_records = []
+    driver_dead = False
+
+    for i, (_, row) in enumerate(bulk_df.iterrows(), start=1):
+        filters = bulk_row_to_filters(row)
+        input_records.append({"Input Row": i, **filters})
+
+        if progress_cb:
+            progress_cb(i, len(bulk_df), filters)
+
+        if driver_dead:
+            print(f"[srk][bulk] row {i}: skipped, driver already dead")
+            continue
+
+        last_err = None
+        df = None
+        for attempt in (1, 2):
+            try:
+                # row 1 (or a retry after driver trouble): fresh nav. Otherwise modify-search.
+                fresh = (i == 1) or (attempt == 2)
+                df = run(driver, filters, fetch_video=False, fresh_nav=fresh)
+                break
+            except Exception as e:
+                last_err = e
+                print(f"[srk][bulk] row {i} attempt {attempt} failed: {e}")
+                if not _driver_alive(driver):
+                    driver_dead = True
+                    break
+
+        if df is None:
+            print(f"[srk][bulk] row {i}: giving up after retry ({last_err})")
+            continue
+
+        df.insert(0, "Input Row", i)
+        all_frames.append(df)
+        print(f"[srk][bulk] row {i}: {len(df)} results")
+
+    all_df = pd.concat(all_frames, ignore_index=True) if all_frames else pd.DataFrame(
+        columns=["Input Row"] + SRK_RESULT_COLUMNS
+    )
+    inputs_df = pd.DataFrame(input_records)
+    return inputs_df, all_df

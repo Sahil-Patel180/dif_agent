@@ -17,7 +17,7 @@ from datetime import date
 from dateutil.relativedelta import relativedelta
 from excel_export import build_excel, select_and_rename, SUMMARY_COLUMNS, DETAILS_COLUMNS
 
-from srk_scraper import run as run_srk
+from srk_scraper import run as run_srk, run_bulk as run_srk_bulk
 import undetected_chromedriver as uc
 import traceback
 
@@ -255,5 +255,84 @@ elif platform == "SRK":
                 "Download Excel Report",
                 data=excel_buffer.getvalue(),
                 file_name=f"srk_report_{(company_name or 'company').replace(' ', '_')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
+    st.divider()
+    st.subheader("Bulk Search (multiple input sets)")
+    st.caption(
+        "Upload agent_srk_bulkinput.xlsx. Each row = one input set, run sequentially: "
+        "enter filters -> search -> full scroll-scan results -> back to input page -> next row. "
+        "Cols read: SHAPE, CARAT From, CARAT To, CLARITY, COLOUR, SHADE, CUT, POLISH, "
+        "SYMMETRY, FLUORESCENCE, LUSTER, LAB, TOTAL DEPTH From, TOTAL DEPTH To."
+    )
+    bulk_file = st.file_uploader("Bulk input file", type=["xlsx"], key="bulk_file")
+
+    col_c, col_d = st.columns(2)
+    if col_c.button("1. Open Browser & Login (bulk)"):
+        if "srk_driver" in st.session_state:
+            try:
+                st.session_state.srk_driver.quit()
+            except Exception:
+                pass
+        st.session_state.srk_driver = build_manual_login_driver()
+        st.session_state.srk_driver.get(SRK_LOGIN_URL)
+        st.info("Browser window opened. Log in + solve captcha there, then click step 2 below.")
+
+    run_bulk_clicked = col_d.button("2. I've Logged In → Run Bulk")
+
+    if run_bulk_clicked:
+        if "srk_driver" not in st.session_state:
+            st.error("Click 'Open Browser & Login (bulk)' first.")
+        elif bulk_file is None:
+            st.error("Upload agent_srk_bulkinput.xlsx first.")
+        else:
+            bulk_df = pd.read_excel(bulk_file)
+            progress = st.progress(0.0, text="Starting...")
+            status = st.empty()
+
+            def _progress_cb(i, total, filters):
+                progress.progress(i / total, text=f"Row {i}/{total}")
+                status.write(f"Row {i}/{total}: {filters}")
+
+            with st.spinner("Running bulk search..."):
+                try:
+                    inputs_df, all_df = run_srk_bulk(
+                        st.session_state.srk_driver, bulk_df, progress_cb=_progress_cb
+                    )
+                except Exception as e:
+                    traceback.print_exc()
+                    st.error(f"Bulk run failed: {e}")
+                    st.stop()
+                finally:
+                    try:
+                        st.session_state.srk_driver.quit()
+                    except Exception:
+                        pass
+                    if "srk_driver" in st.session_state:
+                        del st.session_state.srk_driver
+
+            st.subheader(f"Bulk Results ({len(all_df)} rows across {len(inputs_df)} input sets)")
+            st.dataframe(all_df)
+
+            bulk_buffer = io.BytesIO()
+            with pd.ExcelWriter(bulk_buffer, engine="openpyxl") as writer:
+                inputs_df.to_excel(writer, index=False, sheet_name="INPUTS")
+                all_df.to_excel(writer, index=False, sheet_name="ALL")
+                for sheet_name in ("INPUTS", "ALL"):
+                    ws = writer.sheets[sheet_name]
+                    for row in ws.iter_rows():
+                        for cell in row:
+                            cell.font = Font(name="Arial", bold=(cell.row == 1))
+                    for col_cells in ws.columns:
+                        width = max(
+                            len(str(c.value)) if c.value is not None else 0 for c in col_cells
+                        ) + 2
+                        ws.column_dimensions[col_cells[0].column_letter].width = min(width, 40)
+
+            st.download_button(
+                "Download Bulk Excel Report",
+                data=bulk_buffer.getvalue(),
+                file_name=f"srk_bulk_report_{(company_name or 'company').replace(' ', '_')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
