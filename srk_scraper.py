@@ -183,10 +183,16 @@ SRK_FIELD_KEY_TO_HEADER = {
 
 
 def _find_horizontal_scroller(driver):
-    """Walk up from a cell until we find the element that actually scrolls horizontally."""
+    """Ignite UI grids drive column virtualization through a hidden helper div
+    (class containing 'vhelper--horizontal') — scrolling the visible content div
+    directly (previous approach) grabbed the wrong, much-smaller-range element.
+    """
     return driver.execute_script("""
+        let vh = document.querySelector('[class*="vhelper--horizontal"]');
+        if (vh && vh.scrollWidth > vh.clientWidth) return vh;
+
+        // fallback: walk up from a cell looking for anything that actually scrolls
         const cell = document.querySelector('igx-grid-cell');
-        if (!cell) return null;
         let el = cell;
         while (el) {
             if (el.scrollWidth > el.clientWidth + 5) return el;
@@ -216,7 +222,12 @@ def parse_results(driver, fetch_video=True, timeout=15):
             if not header:
                 continue
             # first-seen wins — value doesn't change between scroll positions, just avoid overwrite
-            rows_data.setdefault(rowindex, {}).setdefault(header, c.text.strip())
+            text = c.text.strip()
+            row_dict = rows_data.setdefault(rowindex, {})
+            if text:  # never let a blank/mid-render scan overwrite or block a real value
+                row_dict[header] = text
+            else:
+                row_dict.setdefault(header, "")
             row_anchor.setdefault(rowindex, c)
         return len(cells)
 
@@ -230,12 +241,16 @@ def parse_results(driver, fetch_video=True, timeout=15):
         max_scroll = driver.execute_script(
             "return arguments[0].scrollWidth - arguments[0].clientWidth;", scroller
         )
-        step = 300
+        step = 100  # narrow virtualization buffer — 300px let some columns slip through the gap
         pos = 0
         while pos < max_scroll:
             pos = min(pos + step, max_scroll)
-            driver.execute_script("arguments[0].scrollLeft = arguments[1];", scroller, pos)
-            time.sleep(0.3)  # let Angular render the newly-virtualized cells
+            driver.execute_script(
+                "arguments[0].scrollLeft = arguments[1]; "
+                "arguments[0].dispatchEvent(new Event('scroll'));",
+                scroller, pos,
+            )
+            time.sleep(0.4)  # let Angular render the newly-virtualized cells
             n = scan_once()
             print(f"[srk] scroll pos {pos}/{max_scroll}: found {n} igx-grid-cell elements")
         driver.execute_script("arguments[0].scrollLeft = 0;", scroller)
