@@ -52,9 +52,25 @@ SRK_SELECTBUTTON_ID_KEYS = {"luster": "lusterMultiselect", "shade": "shadeMultis
 
 def apply_shape(driver, shape: str, timeout=10):
     xpath = f"//span[@class='shape-label' and text()='{shape}']/ancestor::a"
-    WebDriverWait(driver, timeout).until(
-        EC.element_to_be_clickable((By.XPATH, xpath))
-    ).click()
+    try:
+        WebDriverWait(driver, timeout).until(
+            EC.element_to_be_clickable((By.XPATH, xpath))
+        ).click()
+    except Exception:
+        count = driver.execute_script(
+            "return document.evaluate(arguments[0], document, null, "
+            "XPathResult.UNORDERED_NODE_SNAPSHOT_TYPE, null).snapshotLength;",
+            xpath
+        )
+        print(f"[srk][debug] apply_shape xpath match count={count}, "
+              f"url={driver.current_url!r}, title={driver.title!r}, "
+              f"readyState={driver.execute_script('return document.readyState')!r}")
+        try:
+            driver.save_screenshot("srk_debug_apply_shape_FAILURE.png")
+            print("[srk] screenshot saved: srk_debug_apply_shape_FAILURE.png")
+        except Exception:
+            pass
+        raise
 
 
 def apply_carat_range(driver, from_val, to_val):
@@ -62,10 +78,12 @@ def apply_carat_range(driver, from_val, to_val):
         el = driver.find_element(By.ID, "fromValue")
         el.clear()
         el.send_keys(str(from_val))
+        print(f"[srk][debug] carat fromValue readback={el.get_attribute('value')!r} (wanted {from_val})")
     if to_val is not None:
         el = driver.find_element(By.ID, "toValue")
         el.clear()
         el.send_keys(str(to_val))
+        print(f"[srk][debug] carat toValue readback={el.get_attribute('value')!r} (wanted {to_val})")
 
 
 def apply_total_depth_range(driver, from_val, to_val):
@@ -73,10 +91,12 @@ def apply_total_depth_range(driver, from_val, to_val):
         el = driver.find_element(By.XPATH, "//input[@id='Total DepthFromValue']")
         el.clear()
         el.send_keys(str(from_val))
+        print(f"[srk][debug] depth fromValue readback={el.get_attribute('value')!r} (wanted {from_val})")
     if to_val is not None:
         el = driver.find_element(By.XPATH, "//input[@id='Total DepthToValue']")
         el.clear()
         el.send_keys(str(to_val))
+        print(f"[srk][debug] depth toValue readback={el.get_attribute('value')!r} (wanted {to_val})")
 
 
 def apply_filters(driver, filters: dict):
@@ -107,15 +127,23 @@ def apply_filters(driver, filters: dict):
             print(f"[srk] window handles alive: {driver.window_handles}")
 
 
-def open_modify_search(driver, timeout=10):
+def open_modify_search(driver, timeout=10, required=True):
     """Click 'Modify Search' icon on the result page — opens filter panel back up
     WITHOUT navigating away / reloading. Confirmed real DOM: span#filter with class
     'modify-search-icon', wrapped in an <a>.
+    required=False: tolerate the icon not being clickable — happens when the panel
+    is ALREADY open (e.g. previous input set hit 0 results and we skipped Search,
+    so the panel never closed). In that case just continue, nothing to open.
     """
     xpath = "//span[@id='filter' and contains(@class,'modify-search-icon')]/ancestor::a[1]"
-    WebDriverWait(driver, timeout).until(
-        EC.element_to_be_clickable((By.XPATH, xpath))
-    ).click()
+    try:
+        WebDriverWait(driver, timeout).until(
+            EC.element_to_be_clickable((By.XPATH, xpath))
+        ).click()
+    except Exception:
+        if required:
+            raise
+        print("[srk] modify-search icon not clickable — panel likely already open, continuing")
 
 
 def reset_search(driver, timeout=10):
@@ -127,6 +155,23 @@ def reset_search(driver, timeout=10):
     WebDriverWait(driver, timeout).until(
         EC.element_to_be_clickable((By.XPATH, xpath))
     ).click()
+
+
+def get_preview_count(driver, timeout=5):
+    """Filter panel shows a live '< N stones matching your criteria found.' label
+    (id='searchfooter') as filters are picked, BEFORE the final Search click. If it
+    reads 0, skip clicking Search + scanning entirely — saves a full round trip on
+    empty input sets. Returns int or None if the label isn't there/unreadable.
+    """
+    try:
+        el = WebDriverWait(driver, timeout).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "#searchfooter label"))
+        )
+        import re
+        m = re.search(r"(\d+)", el.text.strip())
+        return int(m.group(1)) if m else None
+    except Exception:
+        return None
 
 
 def run_search(driver, timeout=15, wait_for_new_results=False):
@@ -276,39 +321,54 @@ def scan_full_grid(driver, timeout=15):
     So: outer loop = vertical (rows), inner loop = full horizontal sweep at each
     vertical stop. rows_data/row_anchor persist across every stop -> merges into one
     complete set regardless of scan order (first-non-blank-wins per cell).
+
+    Speed: scan_once used to be N Selenium round-trips (one .text/.get_attribute
+    per cell) — that per-cell network hop was the real cost, not the sleeps. Now a
+    single execute_script pulls every visible cell's rowindex/field/text in one call.
+    Vertical step is now page-sized (~90% of the grid's own viewport height) instead
+    of ~1 row at a time — virtualization only cares about what's near viewport, a
+    tiny per-row step was just re-scanning the same rendered rows over and over.
     """
-    WebDriverWait(driver, timeout).until(
-        EC.presence_of_element_located((By.TAG_NAME, "igx-grid-cell"))
-    )
+    try:
+        WebDriverWait(driver, timeout).until(
+            EC.presence_of_element_located((By.TAG_NAME, "igx-grid-cell"))
+        )
+    except Exception:
+        print("[srk] no result grid appeared within timeout — treating as 0 results")
+        return {}, {}
 
     rows_data = {}   # rowindex -> {our_header: text}
-    row_anchor = {}  # rowindex -> one cell, used to locate the row for video-link lookup
+    row_anchor = {}  # rowindex -> True, just existence-tracking now (video-link path re-queries live)
+
+    SCAN_JS = """
+        const cells = document.querySelectorAll('igx-grid-cell');
+        const out = [];
+        for (const c of cells) {
+            const ri = c.getAttribute('data-rowindex');
+            if (ri === null) continue;
+            const described = c.getAttribute('aria-describedby') || '';
+            const us = described.indexOf('_');
+            const key = us >= 0 ? described.slice(us + 1) : described;
+            const stoneEl = c.querySelector('a.stoneid-text');
+            const text = (stoneEl ? stoneEl.textContent : c.innerText || c.textContent || '').trim();
+            out.push([ri, key, text]);
+        }
+        return out;
+    """
 
     def scan_once():
-        cells = driver.find_elements(By.TAG_NAME, "igx-grid-cell")
-        for c in cells:
-            rowindex = c.get_attribute("data-rowindex")
-            if rowindex is None:
-                continue
-            described = c.get_attribute("aria-describedby") or ""
-            field_key = described.split("_", 1)[1] if "_" in described else described
+        data = driver.execute_script(SCAN_JS)
+        for rowindex, field_key, text in data:
             header = SRK_FIELD_KEY_TO_HEADER.get(field_key)
             if not header:
                 continue
-            if header == "Stone ID":
-                try:
-                    text = c.find_element(By.CSS_SELECTOR, "a.stoneid-text").text.strip()
-                except Exception:
-                    text = ""
-            else:
-                text = c.text.strip()
             row_dict = rows_data.setdefault(rowindex, {})
             if text:  # never let a blank/mid-render scan overwrite or block a real value
                 row_dict[header] = text
             else:
                 row_dict.setdefault(header, "")
-            row_anchor.setdefault(rowindex, c)
-        return len(cells)
+            row_anchor.setdefault(rowindex, True)
+        return len(data)
 
     h_scroller = _find_horizontal_scroller(driver)
     v_scroller = _find_vertical_scroller(driver)
@@ -321,7 +381,7 @@ def scan_full_grid(driver, timeout=15):
         max_h = driver.execute_script(
             "return arguments[0].scrollWidth - arguments[0].clientWidth;", h_scroller
         )
-        step = 100  # narrow buffer — wider step let columns slip through the gap before
+        step = 150  # widened from 100 now that scan itself is cheap — fewer stops, still no gaps
         pos = 0
         while pos < max_h:
             pos = min(pos + step, max_h)
@@ -330,21 +390,21 @@ def scan_full_grid(driver, timeout=15):
                 "arguments[0].dispatchEvent(new Event('scroll'));",
                 h_scroller, pos,
             )
-            time.sleep(0.35)
+            time.sleep(0.18)
             n = scan_once()
             print(f"[srk] {tag} h-pos {pos}/{max_h}: {n} cells, {len(rows_data)} rows so far")
         driver.execute_script(
             "arguments[0].scrollLeft = 0; arguments[0].dispatchEvent(new Event('scroll'));",
             h_scroller,
         )
-        time.sleep(0.2)
+        time.sleep(0.15)
 
     if v_scroller:
         driver.execute_script(
             "arguments[0].scrollTop = 0; arguments[0].dispatchEvent(new Event('scroll'));",
             v_scroller,
         )
-        time.sleep(0.3)
+        time.sleep(0.2)
 
     horizontal_sweep("v-pos 0")
 
@@ -352,8 +412,8 @@ def scan_full_grid(driver, timeout=15):
         max_v = driver.execute_script(
             "return arguments[0].scrollHeight - arguments[0].clientHeight;", v_scroller
         )
-        row_h = _get_row_height(driver)
-        step = max(int(row_h * 0.8), 20)  # <1 row per step, overlap so no row gets skipped
+        client_h = driver.execute_script("return arguments[0].clientHeight;", v_scroller) or 400
+        step = max(int(client_h * 0.85), 100)  # page-sized, ~15% overlap so no row-band gets skipped
         pos = 0
         while pos < max_v:
             pos = min(pos + step, max_v)
@@ -362,7 +422,7 @@ def scan_full_grid(driver, timeout=15):
                 "arguments[0].dispatchEvent(new Event('scroll'));",
                 v_scroller, pos,
             )
-            time.sleep(0.35)
+            time.sleep(0.25)
             horizontal_sweep(f"v-pos {pos}/{max_v}")
         driver.execute_script(
             "arguments[0].scrollTop = 0; arguments[0].dispatchEvent(new Event('scroll'));",
@@ -378,6 +438,9 @@ def scan_full_grid(driver, timeout=15):
 def parse_results(driver, fetch_video=True, timeout=15):
     rows_data, row_anchor = scan_full_grid(driver, timeout=timeout)
 
+    if not rows_data:
+        return pd.DataFrame(columns=SRK_RESULT_COLUMNS)
+
     records = []
     for i, rowindex in enumerate(sorted(rows_data.keys(), key=int), start=1):
         raw = rows_data[rowindex]
@@ -388,11 +451,16 @@ def parse_results(driver, fetch_video=True, timeout=15):
             rec[out_col] = raw.get(src_col, "")
 
         if fetch_video:
+            # video-link path needs a live Selenium element — row_anchor no longer stores
+            # one (JS scan doesn't), so re-locate this row's cell by data-rowindex on demand.
             try:
-                row_el = row_anchor[rowindex].find_element(By.XPATH, "./ancestor::*[@role='row'][1]")
+                cell = driver.find_element(
+                    By.CSS_SELECTOR, f"igx-grid-cell[data-rowindex='{rowindex}']"
+                )
+                row_el = cell.find_element(By.XPATH, "./ancestor::*[@role='row'][1]")
             except Exception:
-                row_el = row_anchor[rowindex]
-            rec["Video Link URL"] = get_video_link(driver, row_el)
+                row_el = None
+            rec["Video Link URL"] = get_video_link(driver, row_el) if row_el is not None else ""
         else:
             rec["Video Link URL"] = ""
 
@@ -425,10 +493,18 @@ def run(driver, filters: dict, fetch_video=True, fresh_nav=True):
         driver.get(SRK_SEARCH_URL)
         _reassert_devtool_block(driver)
     else:
-        open_modify_search(driver)
+        open_modify_search(driver, required=False)
         reset_search(driver)
+        time.sleep(0.4)
 
     apply_filters(driver, filters)
+
+    count = get_preview_count(driver)
+    if count == 0:
+        print("[srk] preview count = 0 — skipping Search click + scan for this input set")
+        print(f"[srk][debug] url={driver.current_url!r} title={driver.title!r}")
+        return pd.DataFrame(columns=SRK_RESULT_COLUMNS)
+
     run_search(driver, wait_for_new_results=not fresh_nav)
     return parse_results(driver, fetch_video=fetch_video)
 
@@ -439,6 +515,12 @@ SHAPE_ABBR = {
     "RD": "Round", "OV": "Oval", "PS": "Pear", "EM": "Emerald", "LR": "L Radiant",
     "PR": "Princess", "SE": "Sq Emerald", "HT": "Heart", "MQ": "Marquise",
     "CU": "Cushion", "CP": "Cu Plasma", "TR": "Triangular",
+}
+SHADE_ABBR = {
+    "N": "None", "NONE": "None", "NIL": "None",
+    "MT1": "Mix Tinge 1", "MT2": "Mix Tinge 2",
+    "PT": "Pink Tinge", "GT": "Green Tinge",
+    "BR": "Brown", "BROWN": "Brown",
 }
 LUSTER_ABBR = {
     "EX": "Excellent", "VG": "Very Good", "G": "Good",
@@ -488,9 +570,19 @@ def bulk_row_to_filters(row) -> dict:
     if luster:
         luster = LUSTER_ABBR.get(luster.upper(), luster)
 
+    shade = _clean(row.get("SHADE"))
+    if shade:
+        shade = SHADE_ABBR.get(shade.upper(), shade)
+    else:
+        shade = "None"  # blank cell = explicitly restrict to no-shade, not "leave site default"
+        # (site's own default left this filter unrestricted and let e.g. Mix Tinge 1
+        # stones slip into an otherwise all-None result set)
+
     fluor = _clean(row.get("FLUORESCENCE"))
     if fluor:
         fluor = FLUOR_ABBR.get(fluor.upper(), fluor)
+    else:
+        fluor = "None"  # same reasoning as shade above
 
     def _num(v):
         v = _clean(v)
@@ -502,7 +594,7 @@ def bulk_row_to_filters(row) -> dict:
         "carat_to": _num(_get_col(row, "CARAT To", "CARAT(To)")),
         "clarity": _clean(row.get("CLARITY")),
         "colour": _clean(row.get("COLOUR")),
-        "shade": _clean(row.get("SHADE")),
+        "shade": shade,
         "cut": _clean(row.get("CUT")),
         "polish": _clean(row.get("POLISH")),
         "symmetry": _clean(row.get("SYMMETRY")),
@@ -549,15 +641,22 @@ def run_bulk(driver, bulk_df: "pd.DataFrame", progress_cb=None):
         for attempt in (1, 2):
             try:
                 # row 1 (or a retry after driver trouble): fresh nav. Otherwise modify-search.
-                fresh = (i == 1) or (attempt == 2)
+                fresh = (i == 1 and attempt == 1)
                 df = run(driver, filters, fetch_video=False, fresh_nav=fresh)
                 break
             except Exception as e:
                 last_err = e
-                print(f"[srk][bulk] row {i} attempt {attempt} failed: {e}")
+                import traceback as _tb
+                print(f"[srk][bulk] row {i} attempt {attempt} failed: "
+                      f"[{type(e).__name__}] {e}")
+                print(_tb.format_exc(limit=6))
                 if not _driver_alive(driver):
                     driver_dead = True
                     break
+                try:
+                    driver.save_screenshot(f"srk_debug_row{i}_attempt{attempt}_FAILURE.png")
+                except Exception:
+                    pass
 
         if df is None:
             print(f"[srk][bulk] row {i}: giving up after retry ({last_err})")
