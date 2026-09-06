@@ -50,14 +50,15 @@ def build_manual_login_driver():
 st.set_page_config(page_title="Rapaport Discount Agent", layout="centered")
 st.title("Rapaport Discount % Agent")
 
-st.subheader("Login")
-col1, col2 = st.columns(2)
-username = col1.text_input("Username", value=os.getenv("RAPAPORT_USERNAME", ""))
-password = col2.text_input("Password", value=os.getenv("RAPAPORT_PASSWORD", ""), type="password")
-company_name = st.text_input("Run Label (optional, used only for the Excel filename)")
 platform = st.radio("Platform", ["Rapaport", "SRK"])
+company_name = st.text_input("Run Label (optional, used only for the Excel filename)")
 
 if platform == "Rapaport":
+    st.subheader("Login")
+    col1, col2 = st.columns(2)
+    username = col1.text_input("Username", value=os.getenv("RAPAPORT_USERNAME", ""))
+    password = col2.text_input("Password", value=os.getenv("RAPAPORT_PASSWORD", ""), type="password")
+
     st.subheader("Filters")
 
     # 1. Shape
@@ -157,108 +158,6 @@ if platform == "Rapaport":
             )
 
 elif platform == "SRK":
-    st.subheader("Filters")
-
-    shape = st.selectbox("Shape", ["Round", "Oval", "Pear", "Emerald", "L Radiant",
-                                    "Princess", "Sq Emerald", "Heart", "Marquise",
-                                    "Cushion", "Cu Plasma", "Triangular"])
-    c1, c2 = st.columns(2)
-    carat_min = c1.number_input("Carat Min", min_value=0.0, step=0.01, value=0.0)
-    carat_max = c2.number_input("Carat Max", min_value=0.0, step=0.01, value=0.0)
-
-    clarity = st.selectbox("Clarity", ["FL", "IF", "VVS1", "VVS2", "VS1", "VS2",
-                                        "SI1", "SI2", "SI3", "I1", "I2", "I3"])
-    colour = st.selectbox("Colour", ["D", "E", "F", "G", "H", "I", "J", "K", "L", "M"])
-    shade = st.selectbox("Shade", ["None", "Brown", "Mix Tinge 1", "Mix Tinge 2",
-                                    "Pink Tinge", "Green Tinge"])
-    cut = st.selectbox("Cut", ["EX", "VG", "G", "F"])
-    polish = st.selectbox("Polish", ["EX", "VG", "G", "F"])
-    symmetry = st.selectbox("Symmetry", ["EX", "VG", "G", "F"])
-    fluorescence = st.selectbox("Fluorescence", ["None", "Faint", "Medium", "Strong", "Very Strong"])
-    luster = st.selectbox("Luster", ["Excellent", "Very Good", "Good", "Slight Milky",
-                                      "Medium Milky", "Heavy Milky"])
-    lab = st.selectbox("Lab", ["GIA", "IGI", "Non-Cert", "HRD", "FM", "IOD"])
-
-    c3, c4 = st.columns(2)
-    total_depth_min = c3.number_input("Total Depth Min", min_value=0.0, max_value=100.0, value=0.0, step=0.1)
-    total_depth_max = c4.number_input("Total Depth Max", min_value=0.0, max_value=100.0, value=0.0, step=0.1)
-
-    fetch_video = st.checkbox("Fetch video link URL (slower — opens new tab per row)", value=True)
-
-    st.caption("Site has captcha → login done by hand in a real browser window. Headless not possible.")
-
-    col_a, col_b = st.columns(2)
-
-    if col_a.button("1. Open Browser & Login"):
-        if "srk_driver" in st.session_state:
-            try:
-                st.session_state.srk_driver.quit()
-            except Exception:
-                pass
-        st.session_state.srk_driver = build_manual_login_driver()
-        st.session_state.srk_driver.get(SRK_LOGIN_URL)
-        st.info("Browser window opened. Log in + solve captcha there, then click step 2 below.")
-
-    run_clicked = col_b.button("2. I've Logged In → Run Search")
-
-    if run_clicked:
-        if "srk_driver" not in st.session_state:
-            st.error("Click 'Open Browser & Login' first.")
-        else:
-            filters = {
-                "shape": shape or None,
-                "carat_from": carat_min or None,
-                "carat_to": carat_max or None,
-                "clarity": clarity or None,
-                "colour": colour or None,
-                "shade": shade or None,
-                "cut": cut or None,
-                "polish": polish or None,
-                "symmetry": symmetry or None,
-                "fluorescence": fluorescence or None,
-                "luster": luster or None,
-                "lab": lab or None,
-                "total_depth_from": total_depth_min or None,
-                "total_depth_to": total_depth_max or None,
-            }
-            with st.spinner("Fetching results..."):
-                try:
-                    srk_df = run_srk(st.session_state.srk_driver, filters, fetch_video=fetch_video)
-                except Exception as e:
-                    traceback.print_exc()  # full stack -> terminal, read this not the red box
-                    st.error(f"Failed: {e}")
-                    st.info("Most likely a selector in srk_scraper.py doesn't match the live page yet "
-                             "(login page selectors + search page selectors both unverified — check with browser open).")
-                    st.stop()
-                finally:
-                    try:
-                        st.session_state.srk_driver.quit()
-                    except Exception:
-                        pass
-                    del st.session_state.srk_driver
-
-            st.subheader(f"SRK Results ({len(srk_df)} rows)")
-            st.dataframe(srk_df)
-
-            excel_buffer = io.BytesIO()
-            with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
-                srk_df.to_excel(writer, index=False, sheet_name="SRK Results")
-                ws = writer.sheets["SRK Results"]
-                for row in ws.iter_rows():
-                    for cell in row:
-                        cell.font = Font(name="Arial", bold=(cell.row == 1))
-                for col_cells in ws.columns:
-                    width = max(len(str(c.value)) if c.value is not None else 0 for c in col_cells) + 2
-                    ws.column_dimensions[col_cells[0].column_letter].width = min(width, 40)
-
-            st.download_button(
-                "Download Excel Report",
-                data=excel_buffer.getvalue(),
-                file_name=f"srk_report_{(company_name or 'company').replace(' ', '_')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-
-    st.divider()
     st.subheader("Bulk Search (multiple input sets)")
     st.caption(
         "Upload agent_srk_bulkinput.xlsx. Each row = one input set, run sequentially: "
@@ -401,5 +300,105 @@ elif platform == "SRK":
                 "Download Bulk Excel Report",
                 data=bulk_buffer.getvalue(),
                 file_name=f"srk_bulk_report_{(company_name or 'company').replace(' ', '_')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+    st.divider()
+    st.subheader("Filters")
+    shape = st.selectbox("Shape", ["Round", "Oval", "Pear", "Emerald", "L Radiant",
+                                    "Princess", "Sq Emerald", "Heart", "Marquise",
+                                    "Cushion", "Cu Plasma", "Triangular"])
+    c1, c2 = st.columns(2)
+    carat_min = c1.number_input("Carat Min", min_value=0.0, step=0.01, value=0.0)
+    carat_max = c2.number_input("Carat Max", min_value=0.0, step=0.01, value=0.0)
+
+    clarity = st.selectbox("Clarity", ["FL", "IF", "VVS1", "VVS2", "VS1", "VS2",
+                                        "SI1", "SI2", "SI3", "I1", "I2", "I3"])
+    colour = st.selectbox("Colour", ["D", "E", "F", "G", "H", "I", "J", "K", "L", "M"])
+    shade = st.selectbox("Shade", ["None", "Brown", "Mix Tinge 1", "Mix Tinge 2",
+                                    "Pink Tinge", "Green Tinge"])
+    cut = st.selectbox("Cut", ["EX", "VG", "G", "F"])
+    polish = st.selectbox("Polish", ["EX", "VG", "G", "F"])
+    symmetry = st.selectbox("Symmetry", ["EX", "VG", "G", "F"])
+    fluorescence = st.selectbox("Fluorescence", ["None", "Faint", "Medium", "Strong", "Very Strong"])
+    luster = st.selectbox("Luster", ["Excellent", "Very Good", "Good", "Slight Milky",
+                                        "Medium Milky", "Heavy Milky"])
+    lab = st.selectbox("Lab", ["GIA", "IGI", "Non-Cert", "HRD", "FM", "IOD"])
+
+    c3, c4 = st.columns(2)
+    total_depth_min = c3.number_input("Total Depth Min", min_value=0.0, max_value=100.0, value=0.0, step=0.1)
+    total_depth_max = c4.number_input("Total Depth Max", min_value=0.0, max_value=100.0, value=0.0, step=0.1)
+
+    fetch_video = st.checkbox("Fetch video link URL (slower — opens new tab per row)", value=False)
+
+    st.caption("Site has captcha → login done by hand in a real browser window. Headless not possible.")
+
+    col_a, col_b = st.columns(2)
+
+    if col_a.button("1. Open Browser & Login"):
+        if "srk_driver" in st.session_state:
+            try:
+                st.session_state.srk_driver.quit()
+            except Exception:
+                pass
+        st.session_state.srk_driver = build_manual_login_driver()
+        st.session_state.srk_driver.get(SRK_LOGIN_URL)
+        st.info("Browser window opened. Log in + solve captcha there, then click step 2 below.")
+
+    run_clicked = col_b.button("2. I've Logged In → Run Search")
+
+    if run_clicked:
+        if "srk_driver" not in st.session_state:
+            st.error("Click 'Open Browser & Login' first.")
+        else:
+            filters = {
+                "shape": shape or None,
+                "carat_from": carat_min or None,
+                "carat_to": carat_max or None,
+                "clarity": clarity or None,
+                "colour": colour or None,
+                "shade": shade or None,
+                "cut": cut or None,
+                "polish": polish or None,
+                "symmetry": symmetry or None,
+                "fluorescence": fluorescence or None,
+                "luster": luster or None,
+                "lab": lab or None,
+                "total_depth_from": total_depth_min or None,
+                "total_depth_to": total_depth_max or None,
+            }
+            with st.spinner("Fetching results..."):
+                try:
+                    srk_df = run_srk(st.session_state.srk_driver, filters, fetch_video=fetch_video)
+                except Exception as e:
+                    traceback.print_exc()  # full stack -> terminal, read this not the red box
+                    st.error(f"Failed: {e}")
+                    st.info("Most likely a selector in srk_scraper.py doesn't match the live page yet "
+                                "(login page selectors + search page selectors both unverified — check with browser open).")
+                    st.stop()
+                finally:
+                    try:
+                        st.session_state.srk_driver.quit()
+                    except Exception:
+                        pass
+                    del st.session_state.srk_driver
+
+            st.subheader(f"SRK Results ({len(srk_df)} rows)")
+            st.dataframe(srk_df)
+
+            excel_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+                srk_df.to_excel(writer, index=False, sheet_name="SRK Results")
+                ws = writer.sheets["SRK Results"]
+                for row in ws.iter_rows():
+                    for cell in row:
+                        cell.font = Font(name="Arial", bold=(cell.row == 1))
+                for col_cells in ws.columns:
+                    width = max(len(str(c.value)) if c.value is not None else 0 for c in col_cells) + 2
+                    ws.column_dimensions[col_cells[0].column_letter].width = min(width, 40)
+
+            st.download_button(
+                "Download Excel Report",
+                data=excel_buffer.getvalue(),
+                file_name=f"srk_report_{(company_name or 'company').replace(' ', '_')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
