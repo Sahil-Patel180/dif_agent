@@ -50,42 +50,44 @@ def click_option_by_selectbutton_id(driver, selectbutton_id, value, timeout=10):
 SRK_SELECTBUTTON_ID_KEYS = {"luster": "lusterMultiselect", "shade": "shadeMultiselect"}
 
 
-def apply_shape(driver, shape: str, timeout=10):
-    xpath = f"//span[@class='shape-label' and text()='{shape}']/ancestor::a"
-
-    try:
-        el = WebDriverWait(driver, timeout).until(
-            EC.presence_of_element_located((By.XPATH, xpath))
-        )
-
-        driver.execute_script(
-            "arguments[0].scrollIntoView({block:'center', inline:'center'});",
-            el
-        )
-
-        time.sleep(0.15)
+def apply_shape(driver, shape, timeout=10):
+    shapes = shape if isinstance(shape, (list, tuple)) else [shape]
+    for s in shapes:
+        xpath = f"//span[@class='shape-label' and text()='{s}']/ancestor::a"
 
         try:
-            el.click()
-        except Exception:
-            driver.execute_script("arguments[0].click();", el)
+            el = WebDriverWait(driver, timeout).until(
+                EC.presence_of_element_located((By.XPATH, xpath))
+            )
 
-    except Exception:
-        count = driver.execute_script(
-            "return document.evaluate(arguments[0], document, null, "
-            "XPathResult.UNORDERED_NODE_SNAPSHOT_TYPE, null).snapshotLength;",
-            xpath
-        )
-        print(
-            f"[srk][debug] apply_shape xpath match count={count}, "
-            f"url={driver.current_url!r}, title={driver.title!r}, "
-            f"readyState={driver.execute_script('return document.readyState')!r}"
-        )
-        try:
-            driver.save_screenshot("srk_debug_apply_shape_FAILURE.png")
+            driver.execute_script(
+                "arguments[0].scrollIntoView({block:'center', inline:'center'});",
+                el
+            )
+
+            time.sleep(0.15)
+
+            try:
+                el.click()
+            except Exception:
+                driver.execute_script("arguments[0].click();", el)
+
         except Exception:
-            pass
-        raise
+            count = driver.execute_script(
+                "return document.evaluate(arguments[0], document, null, "
+                "XPathResult.UNORDERED_NODE_SNAPSHOT_TYPE, null).snapshotLength;",
+                xpath
+            )
+            print(
+                f"[srk][debug] apply_shape xpath match count={count}, "
+                f"url={driver.current_url!r}, title={driver.title!r}, "
+                f"readyState={driver.execute_script('return document.readyState')!r}"
+            )
+            try:
+                driver.save_screenshot(f"srk_debug_apply_shape_FAILURE_{s}.png")
+            except Exception:
+                pass
+            raise
 
 
 def apply_carat_range(driver, from_val, to_val):
@@ -130,8 +132,11 @@ def apply_filters(driver, filters: dict):
     apply_total_depth_range(driver, filters.get("total_depth_from"), filters.get("total_depth_to"))
 
     for key, label in SRK_FILTER_LABELS.items():
-        val = filters.get(key)
-        if val:
+        vals = filters.get(key)
+        if not vals:
+            continue
+        vals = vals if isinstance(vals, (list, tuple)) else [vals]
+        for val in vals:
             print(f"[srk] clicking {key}={val} (label={label})")
             if key in SRK_SELECTBUTTON_ID_KEYS:
                 click_option_by_selectbutton_id(driver, SRK_SELECTBUTTON_ID_KEYS[key], val)
@@ -139,7 +144,7 @@ def apply_filters(driver, filters: dict):
                 click_option_by_box_id(driver, SRK_BOX_ID_KEYS[key], val)
             else:
                 click_option_near_label(driver, label, val)
-            print(f"[srk] window handles alive: {driver.window_handles}")
+        print(f"[srk] window handles alive: {driver.window_handles}")
 
 
 def open_modify_search(driver, timeout=10, required=True):
@@ -160,9 +165,14 @@ def reset_search(driver, timeout=10):
     id='searchBtn' as the final submit button, text reads 'Reset Search' in this state.
     """
     xpath = "//button[@id='searchBtn' and contains(normalize-space(.),'Reset')]"
-    WebDriverWait(driver, timeout).until(
-        EC.element_to_be_clickable((By.XPATH, xpath))
-    ).click()
+    try:
+        WebDriverWait(driver, timeout).until(
+            EC.element_to_be_clickable((By.XPATH, xpath))
+        ).click()
+        return
+    except Exception:
+        pass
+    print("[srk] reset_search: no Reset button found yet (no search submitted) — no-op")
 
 
 def get_preview_count(driver, timeout=1.5):
@@ -506,7 +516,7 @@ def run(driver, filters: dict, fetch_video=True, fresh_nav=True, panel_already_o
         driver.get(SRK_SEARCH_URL)
         _reassert_devtool_block(driver)
     elif panel_already_open:
-        reset_search(driver)
+        pass  # already reset in-place right after the previous 0-result row
     else:
         open_modify_search(driver, timeout=2, required=False)
         reset_search(driver)
@@ -516,7 +526,8 @@ def run(driver, filters: dict, fetch_video=True, fresh_nav=True, panel_already_o
 
     count = get_preview_count(driver, timeout=1.5)
     if count == 0:
-        print("[srk] preview count = 0 — skipping Search click + scan for this input set")
+        print("[srk] preview count = 0 — resetting now, moving to next input set")
+        reset_search(driver)
         return pd.DataFrame(columns=SRK_RESULT_COLUMNS)
 
     run_search(driver, wait_for_new_results=not fresh_nav)
@@ -559,6 +570,20 @@ def _clean(v):
     return s
 
 
+def _as_list(v, abbr_map=None):
+    """Bulk-input cell -> list of cleaned values. Split on ',' or ';' for
+    multi-select cells (e.g. LAB cell = 'GIA,IGI' -> ['GIA','IGI']).
+    Single-value cells ('GIA') still work -> ['GIA']. Blank/NaN -> []."""
+    v = _clean(v)
+    if v is None:
+        return []
+    import re
+    items = [p.strip() for p in re.split(r"[,;]", v) if p.strip()]
+    if abbr_map:
+        items = [abbr_map.get(p.upper(), p) for p in items]
+    return items
+
+
 def _get_col(row, *names):
     """Try several header spellings — 'CARAT From' vs 'CARAT(From)' etc — first match wins."""
     for n in names:
@@ -572,7 +597,7 @@ def _get_col(row, *names):
 def bulk_row_to_filters(row) -> dict:
     """One row of agent_srk_bulkinput.xlsx -> filters dict for run().
     Expected cols: SHAPE, CARAT From/CARAT(From), CARAT To/CARAT(To), CLARITY,
-    COLOUR, SHADE, CUT, POLISH, SYMMETRY, FLUORESCENCE, LUSTER, LAB,
+    COLOUR, SHADE, CUT, POLISH, SYMMETRY, FLUORESCENCE, LUSTER, LAB 1, LAB 2,
     TOTAL DEPTH From/TOTAL DEPTH(From), TOTAL DEPTH To/TOTAL DEPTH(To).
     Single CARAT/TOTAL DEPTH cols and 'video Link' col ignored.
     """
@@ -580,23 +605,15 @@ def bulk_row_to_filters(row) -> dict:
     if shape:
         shape = SHAPE_ABBR.get(shape.upper(), shape)
 
-    luster = _clean(row.get("LUSTER"))
-    if luster:
-        luster = LUSTER_ABBR.get(luster.upper(), luster)
-
-    shade = _clean(row.get("SHADE"))
-    if shade:
-        shade = SHADE_ABBR.get(shade.upper(), shade)
-    else:
-        shade = "None"  # blank cell = explicitly restrict to no-shade, not "leave site default"
+    shade = _as_list(row.get("SHADE"), SHADE_ABBR)
+    if not shade:
+        shade = ["None"]  # blank cell = explicitly restrict to no-shade, not "leave site default"
         # (site's own default left this filter unrestricted and let e.g. Mix Tinge 1
         # stones slip into an otherwise all-None result set)
 
-    fluor = _clean(row.get("FLUORESCENCE"))
-    if fluor:
-        fluor = FLUOR_ABBR.get(fluor.upper(), fluor)
-    else:
-        fluor = "None"  # same reasoning as shade above
+    fluor = _as_list(row.get("FLUORESCENCE"), FLUOR_ABBR)
+    if not fluor:
+        fluor = ["None"]  # same reasoning as shade above
 
     def _num(v):
         v = _clean(v)
@@ -606,15 +623,15 @@ def bulk_row_to_filters(row) -> dict:
         "shape": shape,
         "carat_from": _num(_get_col(row, "CARAT From", "CARAT(From)")),
         "carat_to": _num(_get_col(row, "CARAT To", "CARAT(To)")),
-        "clarity": _clean(row.get("CLARITY")),
-        "colour": _clean(row.get("COLOUR")),
+        "clarity": _as_list(row.get("CLARITY")),
+        "colour": _as_list(row.get("COLOUR")),
         "shade": shade,
-        "cut": _clean(row.get("CUT")),
-        "polish": _clean(row.get("POLISH")),
-        "symmetry": _clean(row.get("SYMMETRY")),
+        "cut": _as_list(row.get("CUT")),
+        "polish": _as_list(row.get("POLISH")),
+        "symmetry": _as_list(row.get("SYMMETRY")),
         "fluorescence": fluor,
-        "luster": luster,
-        "lab": _clean(row.get("LAB")),
+        "luster": _as_list(row.get("LUSTER"), LUSTER_ABBR),
+        "lab": _as_list(row.get("LAB 1")) + _as_list(row.get("LAB 2")),  # 2 separate cols instead of comma-in-cell
         "total_depth_from": _num(_get_col(row, "TOTAL DEPTH From", "TOTAL DEPTH(From)")),
         "total_depth_to": _num(_get_col(row, "TOTAL DEPTH To", "TOTAL DEPTH(To)")),
     }
@@ -638,7 +655,11 @@ def run_bulk(driver, bulk_df: "pd.DataFrame", progress_cb=None):
 
     for i, (_, row) in enumerate(bulk_df.iterrows(), start=1):
         filters = bulk_row_to_filters(row)
-        input_records.append({"Input Row": i, **filters})
+        display_filters = {
+            k: (", ".join(v) if isinstance(v, (list, tuple)) else v)
+            for k, v in filters.items()
+        }
+        input_records.append({"Input Row": i, **display_filters})
 
         if progress_cb:
             progress_cb(i, len(bulk_df), filters)
