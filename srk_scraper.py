@@ -128,13 +128,6 @@ def apply_filters(driver, filters: dict):
 
 
 def open_modify_search(driver, timeout=10, required=True):
-    """Click 'Modify Search' icon on the result page — opens filter panel back up
-    WITHOUT navigating away / reloading. Confirmed real DOM: span#filter with class
-    'modify-search-icon', wrapped in an <a>.
-    required=False: tolerate the icon not being clickable — happens when the panel
-    is ALREADY open (e.g. previous input set hit 0 results and we skipped Search,
-    so the panel never closed). In that case just continue, nothing to open.
-    """
     xpath = "//span[@id='filter' and contains(@class,'modify-search-icon')]/ancestor::a[1]"
     try:
         WebDriverWait(driver, timeout).until(
@@ -157,21 +150,32 @@ def reset_search(driver, timeout=10):
     ).click()
 
 
-def get_preview_count(driver, timeout=5):
-    """Filter panel shows a live '< N stones matching your criteria found.' label
-    (id='searchfooter') as filters are picked, BEFORE the final Search click. If it
-    reads 0, skip clicking Search + scanning entirely — saves a full round trip on
-    empty input sets. Returns int or None if the label isn't there/unreadable.
+def get_preview_count(driver, timeout=1.5):
+    """Read SRK live result count with a short JS poll.
+
+    Main speed fix for empty searches: the old Selenium WebDriverWait could
+    sit for up to 5 seconds waiting for #searchfooter label. Reading the DOM
+    directly is much cheaper and lets us detect 0-result inputs quickly.
+    Returns int or None when count is not available yet.
     """
-    try:
-        el = WebDriverWait(driver, timeout).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "#searchfooter label"))
-        )
-        import re
-        m = re.search(r"(\d+)", el.text.strip())
-        return int(m.group(1)) if m else None
-    except Exception:
-        return None
+    import re
+    script = """
+        const el = document.querySelector('#searchfooter label');
+        return el ? (el.innerText || el.textContent || '').trim() : '';
+    """
+    deadline = time.monotonic() + timeout
+    last_text = ''
+    while time.monotonic() < deadline:
+        try:
+            text = driver.execute_script(script) or ''
+            last_text = text.strip()
+            m = re.search(r"(\d+)", last_text)
+            if m:
+                return int(m.group(1))
+        except Exception:
+            pass
+        time.sleep(0.08)
+    return None
 
 
 def run_search(driver, timeout=15, wait_for_new_results=False):
@@ -381,7 +385,7 @@ def scan_full_grid(driver, timeout=15):
         max_h = driver.execute_script(
             "return arguments[0].scrollWidth - arguments[0].clientWidth;", h_scroller
         )
-        step = 150  # widened from 100 now that scan itself is cheap — fewer stops, still no gaps
+        step = 300  # was 150 — half the horizontal stops, same coverage since scan itself is cheap
         pos = 0
         while pos < max_h:
             pos = min(pos + step, max_h)
@@ -390,7 +394,7 @@ def scan_full_grid(driver, timeout=15):
                 "arguments[0].dispatchEvent(new Event('scroll'));",
                 h_scroller, pos,
             )
-            time.sleep(0.18)
+            time.sleep(0.12)  # was 0.18
             n = scan_once()
             print(f"[srk] {tag} h-pos {pos}/{max_h}: {n} cells, {len(rows_data)} rows so far")
         driver.execute_script(
@@ -413,7 +417,7 @@ def scan_full_grid(driver, timeout=15):
             "return arguments[0].scrollHeight - arguments[0].clientHeight;", v_scroller
         )
         client_h = driver.execute_script("return arguments[0].clientHeight;", v_scroller) or 400
-        step = max(int(client_h * 0.85), 100)  # page-sized, ~15% overlap so no row-band gets skipped
+        step = max(int(client_h * 0.65), 100)
         pos = 0
         while pos < max_v:
             pos = min(pos + step, max_v)
@@ -422,7 +426,7 @@ def scan_full_grid(driver, timeout=15):
                 "arguments[0].dispatchEvent(new Event('scroll'));",
                 v_scroller, pos,
             )
-            time.sleep(0.25)
+            time.sleep(0.18)  # was 0.25
             horizontal_sweep(f"v-pos {pos}/{max_v}")
         driver.execute_script(
             "arguments[0].scrollTop = 0; arguments[0].dispatchEvent(new Event('scroll'));",
@@ -482,27 +486,22 @@ def _reassert_devtool_block(driver):
         pass
 
 
-def run(driver, filters: dict, fetch_video=True, fresh_nav=True):
-    """Assumes driver already logged in / session active on pure.srk.one.
-    fresh_nav=True: normal single-search path — full driver.get(SRK_SEARCH_URL).
-    fresh_nav=False: bulk path after row 1 — stay on the result page, click
-    'Modify Search' + 'Reset Search' instead of reloading (no full page nav, so
-    no fresh 'please close devtool' race, and much faster than a full reload).
-    """
+def run(driver, filters: dict, fetch_video=True, fresh_nav=True, panel_already_open=False):
     if fresh_nav:
         driver.get(SRK_SEARCH_URL)
         _reassert_devtool_block(driver)
-    else:
-        open_modify_search(driver, required=False)
+    elif panel_already_open:
         reset_search(driver)
-        time.sleep(0.4)
+    else:
+        open_modify_search(driver, timeout=2, required=False)
+        reset_search(driver)
+        time.sleep(0.15)
 
     apply_filters(driver, filters)
 
-    count = get_preview_count(driver)
+    count = get_preview_count(driver, timeout=1.5)
     if count == 0:
         print("[srk] preview count = 0 — skipping Search click + scan for this input set")
-        print(f"[srk][debug] url={driver.current_url!r} title={driver.title!r}")
         return pd.DataFrame(columns=SRK_RESULT_COLUMNS)
 
     run_search(driver, wait_for_new_results=not fresh_nav)
@@ -615,15 +614,12 @@ def _driver_alive(driver) -> bool:
 
 
 def run_bulk(driver, bulk_df: "pd.DataFrame", progress_cb=None):
-    """Sequential: input set 1 -> search -> full scroll-scan -> back to input page
-    -> input set 2 -> ... Stacks all results into one ALL df, echoes inputs into
-    an INPUTS df. Retries a row once on error; stops early (doesn't crash the rest)
-    if the browser itself dies mid-run.
-    Returns (inputs_df, all_df).
-    """
+    bulk_start_time = time.perf_counter()
+
     all_frames = []
     input_records = []
     driver_dead = False
+    panel_already_open = False
 
     for i, (_, row) in enumerate(bulk_df.iterrows(), start=1):
         filters = bulk_row_to_filters(row)
@@ -636,38 +632,61 @@ def run_bulk(driver, bulk_df: "pd.DataFrame", progress_cb=None):
             print(f"[srk][bulk] row {i}: skipped, driver already dead")
             continue
 
-        last_err = None
-        df = None
-        for attempt in (1, 2):
-            try:
-                # row 1 (or a retry after driver trouble): fresh nav. Otherwise modify-search.
-                fresh = (i == 1 and attempt == 1)
-                df = run(driver, filters, fetch_video=False, fresh_nav=fresh)
-                break
-            except Exception as e:
-                last_err = e
-                import traceback as _tb
-                print(f"[srk][bulk] row {i} attempt {attempt} failed: "
-                      f"[{type(e).__name__}] {e}")
-                print(_tb.format_exc(limit=6))
-                if not _driver_alive(driver):
-                    driver_dead = True
-                    break
-                try:
-                    driver.save_screenshot(f"srk_debug_row{i}_attempt{attempt}_FAILURE.png")
-                except Exception:
-                    pass
+        fresh = (i == 1)
 
-        if df is None:
-            print(f"[srk][bulk] row {i}: giving up after retry ({last_err})")
+        try:
+            df = run(
+                driver,
+                filters,
+                fetch_video=False,
+                fresh_nav=fresh,
+                panel_already_open=panel_already_open
+            )
+
+        except Exception as e:
+            import traceback as _tb
+
+            print(
+                f"[srk][bulk] row {i} failed: "
+                f"[{type(e).__name__}] {e}"
+            )
+            print(_tb.format_exc(limit=6))
+
+            if not _driver_alive(driver):
+                driver_dead = True
+
+            try:
+                driver.save_screenshot(
+                    f"srk_debug_row{i}_FAILURE.png"
+                )
+            except Exception:
+                pass
+
+            panel_already_open = False
             continue
+
+        panel_already_open = (len(df) == 0)
 
         df.insert(0, "Input Row", i)
         all_frames.append(df)
+
         print(f"[srk][bulk] row {i}: {len(df)} results")
 
-    all_df = pd.concat(all_frames, ignore_index=True) if all_frames else pd.DataFrame(
-        columns=["Input Row"] + SRK_RESULT_COLUMNS
+    all_df = (
+        pd.concat(all_frames, ignore_index=True)
+        if all_frames
+        else pd.DataFrame(columns=["Input Row"] + SRK_RESULT_COLUMNS)
     )
+
     inputs_df = pd.DataFrame(input_records)
+
+    bulk_end_time = time.perf_counter()
+    total_seconds = bulk_end_time - bulk_start_time
+
+    print(
+        f"[srk][bulk] TOTAL TIME: "
+        f"{total_seconds:.2f} seconds "
+        f"({total_seconds / 60:.2f} minutes)"
+    )
+
     return inputs_df, all_df
