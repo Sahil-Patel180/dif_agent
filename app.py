@@ -288,6 +288,13 @@ elif platform == "SRK":
             st.error("Upload agent_srk_bulkinput.xlsx first.")
         else:
             bulk_df = pd.read_excel(bulk_file)
+            bulk_input_df = bulk_df.copy()
+            bulk_input_df.insert(
+                0,
+                "Input Row",
+                range(1, len(bulk_input_df) + 1)
+            )
+
             progress = st.progress(0.0, text="Starting...")
             status = st.empty()
 
@@ -315,20 +322,80 @@ elif platform == "SRK":
             st.subheader(f"Bulk Results ({len(all_df)} rows across {len(inputs_df)} input sets)")
             st.dataframe(all_df)
 
+            found_input_rows = set()
+
+            if not all_df.empty and "Input Row" in all_df.columns:
+                found_input_rows = set(
+                    pd.to_numeric(
+                        all_df["Input Row"],
+                        errors="coerce"
+                    )
+                    .dropna()
+                    .astype(int)
+                    .tolist()
+                )
+
+            not_found_df = bulk_input_df[
+                ~bulk_input_df["Input Row"].isin(found_input_rows)
+            ].copy()
+
+            # Show input parameters that produced no results
+            st.subheader(
+                f"Inputs With No Results ({len(not_found_df)})"
+            )
+            st.dataframe(not_found_df)
+
             bulk_buffer = io.BytesIO()
-            with pd.ExcelWriter(bulk_buffer, engine="openpyxl") as writer:
-                inputs_df.to_excel(writer, index=False, sheet_name="INPUTS")
-                all_df.to_excel(writer, index=False, sheet_name="ALL")
-                for sheet_name in ("INPUTS", "ALL"):
+
+            with pd.ExcelWriter(
+                bulk_buffer,
+                engine="openpyxl"
+            ) as writer:
+
+                inputs_df.to_excel(
+                    writer,
+                    index=False,
+                    sheet_name="INPUTS"
+                )
+
+                all_df.to_excel(
+                    writer,
+                    index=False,
+                    sheet_name="ALL"
+                )
+
+                not_found_df.to_excel(
+                    writer,
+                    index=False,
+                    sheet_name="NOT FOUND"
+                )
+
+                for sheet_name in (
+                    "INPUTS",
+                    "ALL",
+                    "NOT FOUND",
+                ):
                     ws = writer.sheets[sheet_name]
-                    for row in ws.iter_rows():
-                        for cell in row:
-                            cell.font = Font(name="Arial", bold=(cell.row == 1))
+
+                    # Bold header
+                    for cell in ws[1]:
+                        cell.font = Font(
+                            name="Arial",
+                            bold=True
+                        )
+
+                    # Auto-size columns
                     for col_cells in ws.columns:
                         width = max(
-                            len(str(c.value)) if c.value is not None else 0 for c in col_cells
+                            len(str(c.value))
+                            if c.value is not None
+                            else 0
+                            for c in col_cells
                         ) + 2
-                        ws.column_dimensions[col_cells[0].column_letter].width = min(width, 40)
+
+                        ws.column_dimensions[
+                            col_cells[0].column_letter
+                        ].width = min(width, 40)
 
             st.download_button(
                 "Download Bulk Excel Report",

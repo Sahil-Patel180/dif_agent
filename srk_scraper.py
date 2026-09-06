@@ -52,22 +52,37 @@ SRK_SELECTBUTTON_ID_KEYS = {"luster": "lusterMultiselect", "shade": "shadeMultis
 
 def apply_shape(driver, shape: str, timeout=10):
     xpath = f"//span[@class='shape-label' and text()='{shape}']/ancestor::a"
+
     try:
-        WebDriverWait(driver, timeout).until(
-            EC.element_to_be_clickable((By.XPATH, xpath))
-        ).click()
+        el = WebDriverWait(driver, timeout).until(
+            EC.presence_of_element_located((By.XPATH, xpath))
+        )
+
+        driver.execute_script(
+            "arguments[0].scrollIntoView({block:'center', inline:'center'});",
+            el
+        )
+
+        time.sleep(0.15)
+
+        try:
+            el.click()
+        except Exception:
+            driver.execute_script("arguments[0].click();", el)
+
     except Exception:
         count = driver.execute_script(
             "return document.evaluate(arguments[0], document, null, "
             "XPathResult.UNORDERED_NODE_SNAPSHOT_TYPE, null).snapshotLength;",
             xpath
         )
-        print(f"[srk][debug] apply_shape xpath match count={count}, "
-              f"url={driver.current_url!r}, title={driver.title!r}, "
-              f"readyState={driver.execute_script('return document.readyState')!r}")
+        print(
+            f"[srk][debug] apply_shape xpath match count={count}, "
+            f"url={driver.current_url!r}, title={driver.title!r}, "
+            f"readyState={driver.execute_script('return document.readyState')!r}"
+        )
         try:
             driver.save_screenshot("srk_debug_apply_shape_FAILURE.png")
-            print("[srk] screenshot saved: srk_debug_apply_shape_FAILURE.png")
         except Exception:
             pass
         raise
