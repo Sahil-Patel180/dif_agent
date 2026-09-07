@@ -513,10 +513,14 @@ def _reassert_devtool_block(driver):
 
 def run(driver, filters: dict, fetch_video=True, fresh_nav=True, panel_already_open=False):
     if fresh_nav:
+        _reassert_devtool_block(driver)      # block BEFORE nav, not after
         driver.get(SRK_SEARCH_URL)
-        _reassert_devtool_block(driver)
+        WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.XPATH, "//span[@class='shape-label']"))
+        )                                     # confirm Angular actually bootstrapped
+        _reassert_devtool_block(driver)        # re-poke once more post-load, cheap insurance
     elif panel_already_open:
-        pass  # already reset in-place right after the previous 0-result row
+        pass
     else:
         open_modify_search(driver, timeout=2, required=False)
         reset_search(driver)
