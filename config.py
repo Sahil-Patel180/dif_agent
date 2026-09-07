@@ -19,6 +19,10 @@ PROFILE_DIR = os.getenv(
     "RAPAPORT_PROFILE_DIR",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "browser_profile"),
 )
+SRK_PROFILE_DIR = os.getenv(
+    "SRK_PROFILE_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "browser_profile_srk"),
+)
 
 SELECTORS = {
     "username_field": "#emailUserName",

@@ -726,3 +726,22 @@ def run_bulk(driver, bulk_df: "pd.DataFrame", progress_cb=None):
     )
 
     return inputs_df, all_df
+
+def logout(driver, timeout=5):
+    """Clean session close before driver.quit() — clicks Logout (id='logoutBox'
+    under the header profile menu), then confirms the "Do you want to logout?"
+    dialog's Yes button (no id on it, matched via ng-reflect-label)."""
+    try:
+        WebDriverWait(driver, timeout).until(
+            EC.element_to_be_clickable((By.ID, "logoutBox"))
+        ).click()
+
+        WebDriverWait(driver, timeout).until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//button[@ng-reflect-label='Yes']")
+            )
+        ).click()
+
+        time.sleep(1)
+    except Exception:
+        print("[srk] logout: control not found/clickable — skipping, driver.quit() will proceed anyway")

@@ -1,0 +1,5 @@
+2026/09/07-11:43:00.812 14e0 Creating DB D:\GitHub\Repos\dif_agent\browser_profile_srk\Default\Local Storage\leveldb since it was missing.
+2026/09/07-11:43:00.928 14e0 Reusing MANIFEST D:\GitHub\Repos\dif_agent\browser_profile_srk\Default\Local Storage\leveldb/MANIFEST-000001
+2026/09/07-11:45:03.200 38c4 Level-0 table #5: started
+2026/09/07-11:45:03.219 38c4 Level-0 table #5: 16128 bytes OK
+2026/09/07-11:45:03.227 38c4 Delete type=0 #3

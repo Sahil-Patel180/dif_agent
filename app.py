@@ -3,6 +3,8 @@ import io
 import streamlit as st
 import pandas as pd
 import traceback
+import config
+import srk_scraper
 from openpyxl.styles import Font
 from dotenv import load_dotenv
 
@@ -37,6 +39,7 @@ def build_manual_login_driver():
     block that request outright via CDP so it never runs.
     """
     opts = uc.ChromeOptions()
+    opts.add_argument(f"--user-data-dir={config.SRK_PROFILE_DIR}")
     opts.add_argument("--start-maximized")
     opts.add_argument("--no-first-run")
     opts.add_argument("--no-default-browser-check")
@@ -219,6 +222,10 @@ elif platform == "SRK":
                     st.stop()
                 finally:
                     try:
+                        srk_scraper.logout(st.session_state.srk_driver)
+                    except Exception:
+                        pass
+                    try:
                         st.session_state.srk_driver.quit()
                     except Exception:
                         pass
@@ -383,6 +390,10 @@ elif platform == "SRK":
                                 "(login page selectors + search page selectors both unverified — check with browser open).")
                     st.stop()
                 finally:
+                    try:
+                        srk_scraper.logout(st.session_state.srk_driver)
+                    except Exception:
+                        pass
                     try:
                         st.session_state.srk_driver.quit()
                     except Exception:

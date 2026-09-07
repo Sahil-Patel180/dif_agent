@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+
+  <meta charset="utf-8">
+  <title>SRK - Pure Light</title>
+  <base href="/">
+
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Expires" content="0" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="format-detection" content="telephone=no">
+  <link rel="icon" href="assets/img/fav.ico">
+
+<link rel="stylesheet" href="https://pck.azureedge.net/srkweb/web-solitaire/prod-pure/1d6a40150fa63afda0a8a89b3aecc9caa84ea96e/styles.c13cfc84d30d69e802c3.css"><link rel="stylesheet" href="https://pck.azureedge.net/srkweb/web-solitaire/prod-pure/1d6a40150fa63afda0a8a89b3aecc9caa84ea96e/hGoldie-color-theme.69c7430b31357b4e1227.css"><link rel="stylesheet" href="https://pck.azureedge.net/srkweb/web-solitaire/prod-pure/1d6a40150fa63afda0a8a89b3aecc9caa84ea96e/srkexports-color-theme.3ff82b0dfe8ba31c5846.css"></head>
+
+<body>
+
+  <app-root>
+    <div id="loading-splash" class="splash-screen">
+      <div class="splash-container">
+        <div class="logo"></div>
+        <div class="load-bar">
+          <div class="bar"></div>
+          <div class="bar"></div>
+          <div class="bar"></div>
+        </div>
+      </div>
+    </div>
+  </app-root>
+
+  <div class='devtool-dialog-ovelay' id='ready' hidden="true">
+    <div class='devtool-dialog'>
+      <header><h4><b id="title"></b></h4></header>
+      <div class='devtool-dialog-msg devtool-message'><p id="devtoolmsg"></p>
+      </div>
+      <footer>
+        <div class='controls'><button class='devtool-button doAction' id="btnmsg" onclick="closeDevtool()"></button>
+        </div>
+      </footer>
+    </div>
+  </div>
+  <!--<div id="htmlHomepage">
+
+    <div class="mainBox">
+      <div class="videobox left">
+        <video autoplay="" class="bgvid" loop="">
+          <source src="https://pck.azureedge.net/srkweb/web-ms/CHRISTMAS_VIDEO.mp4" type="video/mp4">
+        </video>
+      </div>
+
+      <div id="login-container" class="loginbox container-height100 bg-white commonBox right">
+
+        <a href="#" class="closeButton">
+          <span class="close-icon icon-close"></span>
+        </a>
+
+        <div id="login-section" class="loginForm-content">
+          <form id="loginForm">
+            <h2 class="login-title">
+              Login</h2>
+            <div class="input_wrapper">
+              <div class="input-box">
+                <div class="icon">
+                  <span class="login-icon icon-user"></span>
+                </div>
+                <input type="text" name="login" class="login" id="username" placeholder="Username">
+                <div id="errorUserNameOnHomepage" class="ui-g-12 error"></div>
+                <div class="clearfix"></div>
+              </div>
+              <div class="input-box">
+                  <div class="icon">
+                      <span class="login-icon  icon-password"></span>
+                    </div>
+                <input type="password" name="pass" class="pass" id="password" placeholder="Password">
+                <div id="errorPasswordOnHomepage" class="ui-g-12 error"></div>
+                <div class="clearfix"></div>
+              </div>
+            </div>
+            <div class="clearfix"></div>
+            <div class="button">
+              <button type="submit" disabled="" class="log-in ui-state-disabled" name="log-in" id="loginSubmitButton" value="Log in">
+                <span id="loginFormLoading" class="fa fa-spinner fa-pulse" style="float: left; display: none;"></span>
+                Log In
+              </button>
+            </div>
+            <div id="errorLoginMessageOnHomepage" class="ui-g-12 error"></div>
+          </form>
+          <div class="forget_box">
+            <div class="forgotPwd left">
+              <a id="forgot_password_link">Forgot Password ?</a>
+            </div>
+            <div class="registerNow right">
+              <a href="/login/register?register=true" id="register-now-button">Register Now</a>
+            </div>
+            <div class="clearfix"></div>
+          </div>
+        </div>
+
+        <div id="forgot-password-section" class="loginForm-content">
+          <h2 class="login-title">
+            Forgot Password</h2>
+          <div class="input_wrapper padd-l15">
+            <div class="input-box ">
+              <input type="text" name="login" class="login" id="emailid" placeholder="Email ID">
+              <div id="errorForgotPasswordOnHomepage" class="ui-g-12 error"></div>
+              <div class="clearfix"></div>
+              <input type="submit" disabled="" class="log-in marg-l0 ui-state-disabled" name="log-in" id="forgotPasswordButton" value="Submit" style="margin-left: 15px">
+            </div>
+            <div id="errorForgotMessageOnHomepage" class="ui-g-12 error"></div>
+          </div>
+        </div>
+
+        <div id="verify-otp-section" class="loginForm-content">
+          <h2 class="login-title">Verify OTP</h2>
+          <div class="input_wrapper padd-l15">
+            <div class="input-box ">
+              <input type="text" name="login" class="login" id="otp-input" placeholder="">
+              <div class="clearfix"></div>
+              <input type="submit" class="log-in marg-l0 " name="log-in" id="verifyOTPButton" value="Submit">
+            </div>
+            <div id="errorVerifyOTPMessageOnHomepage" class="ui-g-12 error"></div>
+            <div class="ui-g ui-g-12 ui-g-nopad">
+              <a id="resendMobileButtonOnHomePage" class="resend">Resend OTP MOBILE</a>
+            </div>
+            <div class="ui-g ui-g-12 ui-g-nopad">
+              <a id="resendEmailButtonOnHomePage" class="resend">Resend OTP Email</a>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div id="registration-container" class="signupbox bg-white commonBox right">
+
+        <a href="#" class="closeButton">
+          <span class="close-icon icon-close"></span>
+        </a>
+
+        <div class="loginForm-content">
+          <div class="header-fix">
+            <h2 class="login-title">
+              Registration</h2>
+          </div>
+          <div class="clearfix"></div>
+          <form id="registration-form">
+            <div class="input_wrapper">
+
+              <div class="category">
+                <label>* Business Review</label>
+              </div>
+              <div class="input-box ">
+                <input type="text" name="company_name" class="login" id="companyName" placeholder="Company Name">
+              </div>
+              <div class="input-box ">
+                <input type="text" name="contact_person" class="login" id="contactPerson" placeholder="Contact Person">
+              </div>
+              <div class="input-box ">
+                <input type="text" name="email_id" class="login" id="companyEmailID" placeholder="Email ID">
+              </div>
+              <div class="input-box ">
+                <input type="text" name="login_name" class="login" id="loginName" placeholder="Login Name">
+              </div>
+              <div class="input-box ">
+                <input type="text" name="contact_number" class="login" id="companyMobileNumber" placeholder="Mobile Number">
+              </div>
+              <div class="clearfix"></div>
+              <div class="category">
+                <label>* Company Address</label>
+              </div>
+              <div class="row">
+                <div class="ui-g-6">
+                  <div class="dropdown-list">
+                    <select id="company-country-select" name="country" class="input-data">
+                      <option>Country</option>
+                      <option>India</option>
+                      <option>Pakistan</option>
+                    </select>
+                  </div>
+                  <div class="dropdown-list">
+                    <select id="company-city-select" name="state" class="input-data">
+                      <option>City</option>
+                      <option>Surat</option>
+                      <option>Ahmedabad</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="ui-g-6">
+                  <div class="dropdown-list">
+                    <select id="company-state-select" name="city" class="input-data">
+                      <option>State</option>
+                      <option>Gujarat</option>
+                      <option>Rajasthan</option>
+                    </select>
+                  </div>
+                  <div class="dropdown-list">
+                    <select id="company-zipcode-select" name="zip_code" class="input-data">
+                      <option>Zip</option>
+                      <option>395001</option>
+                      <option>395002</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div class="input-box ">
+                <input type="text" name="street" class="login" id="companyStreet" placeholder="Street">
+              </div>
+              <div class="clearfix"></div>
+              <div class="category">
+                <label>Third Party Reference</label>
+              </div>
+              <div class="input-box ">
+                <input type="text" name="third_party_name" class="login" id="thirdPartyName" placeholder="Name">
+              </div>
+              <div class="input-box ">
+                <input type="text" name="third_party_email_id" class="login" id="thirdPartyEmailID" placeholder="Email ID">
+              </div>
+              <div class="row">
+                <div class="ui-g-6">
+                  <div class="dropdown-list">
+                    <select id="third-party-country-select" name="third_party_country" class="input-data">
+                      <option>Country</option>
+                      <option>India</option>
+                      <option>Pakistan</option>
+                    </select>
+                  </div>
+                  <div class="dropdown-list">
+                    <select id="third-party-city-select" name="third_party_city" class="input-data">
+                      <option>City</option>
+                      <option>Surat</option>
+                      <option>Ahmedabad</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="ui-g-6">
+                  <div class="dropdown-list">
+                    <select id="third-party-state-select" name="third_party_state" class="input-data">
+                      <option>State</option>
+                      <option>Gujarat</option>
+                      <option>Rajasthan</option>
+                    </select>
+                  </div>
+                  <div class="dropdown-list">
+                    <select id="third-party-zipcode-select" name="third_party_zip_code" class="input-data">
+                      <option>Zip</option>
+                      <option>395001</option>
+                      <option>395002</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div class="input-box ">
+                <input type="text" name="third_party_street" class="login" id="thirdPartyStreetName" placeholder="Street">
+              </div>
+              <div class="clearfix"></div>
+              <div class="row upload-photo">
+                <div class="category ui-g-9">
+                  <label>* Photo Identity Proof
+                    <p>(Driving Licence, Passport, etc.)</p>
+                  </label>
+                </div>
+                <div class="ui-g-3 upload">
+                  <input type="file" id="registration-document" name="registration-image" accept="image/x-png,image/gif,image/jpeg">
+                </div>
+              </div>
+              <div class="agree ui-g-9">
+                <label class="category">Do You Agree?</label>
+                <div class="clearfix"></div>
+                <div class="check">
+                  <input name="agree" type="checkbox"> I have Read & Agree to the SRK Terms and Conditions
+                </div>
+                <div class="check">
+                  <input type="checkbox" name="recieve_notification" id="receiveNotification"> Require News Letters / Promotional Letters / Stock Update
+                </div>
+
+              </div>
+              <div class="clearfix"></div>
+              <input type="submit" class="log-in marg-l0 " name="log-in" id="registrationButton" value="Submit">
+            </div>
+          </form>
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>-->
+
+
+  <!-- Browser Not Supported Modal -->
+  <div class="landing-page-overlay" id="landingPageOverlay" style="display: none">
+    <div class="landing-page-overlay-content">
+      <h3>We dont support this browser</h3>
+      <p>It is advised to use latest browser for good user experience and your content security.</p>
+      <p>Try latest
+        <a href="https://www.google.com/chrome/browser/desktop/index.html" target="_blank"
+          style="font-weight:bold">Chrome</a>
+        or
+        <a href="https://support.microsoft.com/en-in/help/17621/internet-explorer-downloads" target="_blank"
+          style="font-weight:bold">Internet Explorer</a> browsers
+    </div>
+  </div>
+  <!-- /Browser Not Supported Modal -->
+
+  <script type="text/javascript">
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/service-worker.js').then(function (registration) {
+        console.log('ServiceWorker registration successful with scope: ', registration.scope);
+      });
+    }
+
+    function getBrowerInfo() {
+      var browserDtl = {
+        name: '',
+        version: '',
+        GMT: '',
+        geolocation: null
+      };
+      var ua = navigator.userAgent;
+      var tem;
+      var M = ua.match(/(opera|chrome|safari|firefox|msie|edge|trident(?=\/))\/?\s*(\d+)/i) || [];
+      if (/trident/i.test(M[1])) {
+        tem = /\brv[ :]+(\d+)/g.exec(ua) || [];
+        browserDtl.name = 'IE';
+        browserDtl.version = tem[1] || '';
+        return browserDtl;
+      }
+      if (M[1] === 'Chrome') {
+        tem = ua.match(/\bOPR\/(\d+)/);
+        if (tem != null) {
+          browserDtl.name = 'Opera';
+          browserDtl.version = tem[1] || '';
+          return browserDtl;
+        }
+        tem = ua.match(/\bEdge\/(\d+)/);
+        if (tem != null) {
+          browserDtl.name = 'Edge';
+          browserDtl.version = tem[1] || '';
+          return browserDtl;
+        }
+      }
+      M = M[2] ? [M[1], M[2]] : [navigator.appName, navigator.appVersion, '-?'];
+      if ((tem = ua.match(/version\/(\d+)/i)) != null) {
+        M.splice(1, 1, tem[1]);
+      }
+      var date = new Date();
+      browserDtl.GMT = date.getTimezoneOffset();
+      browserDtl.geolocation = navigator.geolocation ? navigator.geolocation : null;
+      browserDtl.name = M[0];
+      browserDtl.version = M[1];
+      return browserDtl;
+    }
+
+    var browserDtl = getBrowerInfo();
+    var browserName = browserDtl.name;
+    var browserVersion = browserDtl.version;
+    console.log("BROWSER NAME", browserName, browserDtl);
+    if (((browserName.toUpperCase() == 'IE' || browserName.toUpperCase() == 'MSIE') && browserVersion < 11) ||
+      (browserName.toUpperCase() == 'FIREFOX' && browserDtl.GMT === 0 && browserDtl.geolocation === null)) {
+      var appRoot = document.getElementsByTagName('app-root');
+      appRoot[0].style.display = 'block';
+      appRoot[0].style.opacity = '.7';
+      var overlay = document.getElementById('landingPageOverlay');
+      overlay.style.display = 'block';
+    }
+  </script>
+  <script disable-devtool-auto src='../assets/js/disable-devtool.min.js'></script>
+  <script>
+    document.addEventListener('keyup', function (event) {
+      if (event.altKey && event.key === 'y') {
+        var dailogBoxPopUp = document.getElementById("ready");
+        if (dailogBoxPopUp) {
+          dailogBoxPopUp.parentNode.removeChild(dailogBoxPopUp);
+        }
+        DisableDevtool.isSuspend = true;
+      }
+    });
+    window.addEventListener("load", function () {
+      var flag = window.location.href.toString().split('/').map((ele, i) => { return i === 2 && (ele.includes('localhost')) ? 'true' : 'false' })
+      if (flag.indexOf('true') > -1) {
+        var dailogBoxPopUp = document.getElementById("ready");
+        if (dailogBoxPopUp) {
+          dailogBoxPopUp.parentNode.removeChild(dailogBoxPopUp);
+        }
+        DisableDevtool.isSuspend = true;
+      }
+    });
+  </script>
+
+<script type="text/javascript" src="https://pck.azureedge.net/srkweb/web-solitaire/prod-pure/1d6a40150fa63afda0a8a89b3aecc9caa84ea96e/runtime.a94382b589aa38ad52be.js"></script><script type="text/javascript" src="https://pck.azureedge.net/srkweb/web-solitaire/prod-pure/1d6a40150fa63afda0a8a89b3aecc9caa84ea96e/polyfills.484957a07f0328944b25.js"></script><script type="text/javascript" src="https://pck.azureedge.net/srkweb/web-solitaire/prod-pure/1d6a40150fa63afda0a8a89b3aecc9caa84ea96e/scripts.44e578a0993a2970d971.js"></script><script type="text/javascript" src="https://pck.azureedge.net/srkweb/web-solitaire/prod-pure/1d6a40150fa63afda0a8a89b3aecc9caa84ea96e/main.a34d19952ee1b9d71d38.js"></script></body>
+
+</html>
