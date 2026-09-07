@@ -42,6 +42,7 @@ def build_manual_login_driver():
     opts.add_argument("--no-default-browser-check")
     opts.page_load_strategy = "eager"  # don't wait for full page load, just DOM ready
     driver = uc.Chrome(options=opts, log_level=0)
+    driver.maximize_window()
     driver.set_page_load_timeout(60)
     driver.execute_cdp_cmd("Network.enable", {})
     driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": ["*disable-devtool*"]})
@@ -193,6 +194,12 @@ elif platform == "SRK":
                 "Input Row",
                 range(1, len(bulk_input_df) + 1)
             )
+
+            try:
+                st.session_state.srk_driver.minimize_window()
+                st.session_state.srk_driver.maximize_window()
+            except Exception:
+                pass  # OS-level focus trick — window may already be gone/closed manually
 
             progress = st.progress(0.0, text="Starting...")
             status = st.empty()
