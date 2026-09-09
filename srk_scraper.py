@@ -516,8 +516,8 @@ def run(driver, filters: dict, fetch_video=True, fresh_nav=True, panel_already_o
         _reassert_devtool_block(driver)      # block BEFORE nav, not after
         driver.get(SRK_SEARCH_URL)
         WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.XPATH, "//span[@class='shape-label']"))
-        )                                     # confirm Angular actually bootstrapped
+            EC.presence_of_element_located((By.XPATH, "//span[contains(@class,'shape-label')]"))
+        )                                     # confirm Angular actually bootstrapped, xpath = f"//span[contains(@class,'shape-label') and text()='{s}']/ancestor::a"
         _reassert_devtool_block(driver)        # re-poke once more post-load, cheap insurance
     elif panel_already_open:
         pass
@@ -672,7 +672,8 @@ def run_bulk(driver, bulk_df: "pd.DataFrame", progress_cb=None):
             print(f"[srk][bulk] row {i}: skipped, driver already dead")
             continue
 
-        fresh = (i == 1)
+        REFRESH_EVERY = 75   # tune down if it still degrades before this
+        fresh = (i == 1) or (i % REFRESH_EVERY == 1)
 
         try:
             df = run(

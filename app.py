@@ -232,6 +232,15 @@ elif platform == "SRK":
                     if "srk_driver" in st.session_state:
                         del st.session_state.srk_driver
 
+            # right after the "with st.spinner(...)" block finishes (after line 234), before line 235:
+            import os
+            output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bulk_outputs")
+            os.makedirs(output_dir, exist_ok=True)
+            saved_path = os.path.join(
+                output_dir,
+                f"srk_bulk_report_{(company_name or 'company').replace(' ', '_')}_{pd.Timestamp.now():%Y%m%d_%H%M%S}.xlsx",
+            )
+
             st.subheader(f"Bulk Results ({len(all_df)} rows across {len(inputs_df)} input sets)")
             st.dataframe(all_df)
 
@@ -258,64 +267,33 @@ elif platform == "SRK":
             )
             st.dataframe(not_found_df)
 
-            bulk_buffer = io.BytesIO()
+            try:
+                bulk_buffer = io.BytesIO()
+                with pd.ExcelWriter(bulk_buffer, engine="openpyxl") as writer:
+                    inputs_df.to_excel(writer, index=False, sheet_name="INPUTS")
+                    all_df.to_excel(writer, index=False, sheet_name="ALL")
+                    not_found_df.to_excel(writer, index=False, sheet_name="NOT FOUND")
+                    for sheet_name in ("INPUTS", "ALL", "NOT FOUND"):
+                        ws = writer.sheets[sheet_name]
+                        for cell in ws[1]:
+                            cell.font = Font(name="Arial", bold=True)
+                        for col_cells in ws.columns:
+                            width = max(len(str(c.value)) if c.value is not None else 0 for c in col_cells) + 2
+                            ws.column_dimensions[col_cells[0].column_letter].width = min(width, 40)
 
-            with pd.ExcelWriter(
-                bulk_buffer,
-                engine="openpyxl"
-            ) as writer:
+                with open(saved_path, "wb") as f:
+                    f.write(bulk_buffer.getvalue())
+                st.success(f"Also saved to disk regardless of browser state: {saved_path}")
 
-                inputs_df.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="INPUTS"
+                st.download_button(
+                    "Download Bulk Excel Report",
+                    data=bulk_buffer.getvalue(),
+                    file_name=f"srk_bulk_report_{(company_name or 'company').replace(' ', '_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
-
-                all_df.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="ALL"
-                )
-
-                not_found_df.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="NOT FOUND"
-                )
-
-                for sheet_name in (
-                    "INPUTS",
-                    "ALL",
-                    "NOT FOUND",
-                ):
-                    ws = writer.sheets[sheet_name]
-
-                    # Bold header
-                    for cell in ws[1]:
-                        cell.font = Font(
-                            name="Arial",
-                            bold=True
-                        )
-
-                    # Auto-size columns
-                    for col_cells in ws.columns:
-                        width = max(
-                            len(str(c.value))
-                            if c.value is not None
-                            else 0
-                            for c in col_cells
-                        ) + 2
-
-                        ws.column_dimensions[
-                            col_cells[0].column_letter
-                        ].width = min(width, 40)
-
-            st.download_button(
-                "Download Bulk Excel Report",
-                data=bulk_buffer.getvalue(),
-                file_name=f"srk_bulk_report_{(company_name or 'company').replace(' ', '_')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
+            except Exception as e:
+                traceback.print_exc()
+                st.error(f"Excel build/save failed: {e}")
     st.divider()
     st.subheader("Filters")
     shape = st.selectbox("Shape", ["Round", "Oval", "Pear", "Emerald", "L Radiant",

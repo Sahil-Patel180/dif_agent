@@ -6,5 +6,6 @@ venv/
 *.xlsx
 .streamlit/
 .env.example
-browser_profile/*
-browser_profile_srk/*
+browser_profile/
+browser_profile_srk/
+checkpoints/
