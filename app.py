@@ -172,6 +172,11 @@ if platform == "Rapaport":
 
     include_report_date = True
     headless = st.checkbox("Run headless (uncheck first time to watch & debug selectors)", value=False)
+    resume = st.checkbox(
+        "Resume previous run if it crashed/stopped midway (same filters)",
+        value=True,
+        help="If a checkpoint exists for this exact filter combo, already-scraped rows are skipped, not re-fetched.",
+    )
 
     if st.button("Run Search"):
         if not username or not password:
@@ -196,9 +201,9 @@ if platform == "Rapaport":
             }
             with st.spinner("Logging in and fetching results..."):
                 try:
-                    df = run(
+                    df, checkpoint_csv_path, checkpoint_progress_path = run(
                         username, password, company_name or "Unknown", filters,
-                        headless=headless, include_report_date=True,
+                        headless=headless, include_report_date=True, resume=resume,
                     )
                 except Exception as e:
                     st.error(f"Failed: {e}")
@@ -217,6 +222,10 @@ if platform == "Rapaport":
                 file_name=f"rapaport_report_{(company_name or 'company').replace(' ', '_')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
+
+            if st.button("Clear checkpoint (search done, start fresh next time)"):
+                clear_checkpoint(checkpoint_csv_path, checkpoint_progress_path)
+                st.success("Checkpoint cleared.")
 
 elif platform == "SRK":
     st.subheader("Bulk Search (multiple input sets)")
