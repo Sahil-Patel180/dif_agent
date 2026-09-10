@@ -1,3 +1,4 @@
+import os
 import time
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
@@ -5,7 +6,15 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import pandas as pd
 
-from config import SRK_SEARCH_URL, SRK_FILTER_LABELS, SRK_COLUMN_MAP, SRK_RESULT_COLUMNS
+from config import (
+    SRK_SEARCH_URL, SRK_ROOT_URL, SRK_SIDEBAR_SEARCH_NAV,
+    SRK_FILTER_LABELS, SRK_COLUMN_MAP, SRK_RESULT_COLUMNS,
+    CHECKPOINT_DIR,
+)
+from checkpoint import (
+    paths_for, append_checkpoint, write_progress, load_progress,
+    load_checkpoint_df,
+)
 
 
 def click_option_near_label(driver, label_text, value, timeout=10):
@@ -506,18 +515,64 @@ def _reassert_devtool_block(driver):
     bulk run dying at the same step every row).
     """
     try:
-        driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": ["*disable-devtool*"]})
-    except Exception:
-        pass
+        driver.execute_cdp_cmd(
+            "Network.setBlockedURLs",
+            {"urls": ["*://pure.srk.one/assets/js/disable-devtool.min.js"]},
+        )
+    except Exception as e:
+        # was a silent `pass` before — if this call is ever failing, we need
+        # to know, since a failed block here is the prime suspect for the
+        # "row 1 times out on a blank page" failure.
+        print(f"[srk][diag] _reassert_devtool_block FAILED: {type(e).__name__}: {e}")
+
+
+def _diag_nav_state(driver, label=""):
+    """Same idea as app.py's _diagnose_blank_page — prints to the TERMINAL,
+    not the Streamlit page. Call this at the moment a navigation looks stuck
+    so we're diagnosing the ACTUAL failing page, not just the /login page
+    from Open Browser & Login (which always loads fine and tells us nothing
+    about a later mid-run failure)."""
+    try:
+        print(f"[srk][diag]{' ' + label if label else ''} url:", driver.current_url)
+        print(f"[srk][diag] readyState:", driver.execute_script("return document.readyState"))
+        print(f"[srk][diag] body length:", len(driver.execute_script("return document.body.innerHTML")))
+        for entry in driver.get_log("browser"):
+            print(f"[srk][diag][console] {entry.get('level')}: {entry.get('message')}")
+    except Exception as e:
+        print(f"[srk][diag] diagnostic itself failed: {type(e).__name__}: {e}")
 
 
 def run(driver, filters: dict, fetch_video=True, fresh_nav=True, panel_already_open=False):
     if fresh_nav:
         _reassert_devtool_block(driver)      # block BEFORE nav, not after
-        driver.get(SRK_SEARCH_URL)
-        WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.XPATH, "//span[contains(@class,'shape-label')]"))
-        )                                     # confirm Angular actually bootstrapped, xpath = f"//span[contains(@class,'shape-label') and text()='{s}']/ancestor::a"
+
+        # Do NOT hard-load SRK_SEARCH_URL directly — confirmed 09-Sep-2026
+        # via console diag: a hard driver.get() straight to that deep route
+        # throws "Cannot read properties of undefined (reading
+        # 'ApplicationApi'/'AuditApi')" inside Angular's resolvers, and the
+        # app bounces back to root. Root cause: some app-config init only
+        # completes when the SPA boots from root, not from a deep-link hard
+        # reload. Fix: land on root (matches the flow that already works
+        # when logging in by hand), then CLICK the sidebar nav so Angular
+        # does client-side routing instead of another full reload.
+        if driver.current_url and "pure.srk.one" not in driver.current_url:
+            driver.get(SRK_ROOT_URL)
+
+        try:
+            nav_el = WebDriverWait(driver, 20).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, SRK_SIDEBAR_SEARCH_NAV))
+            )
+            nav_el.click()
+            WebDriverWait(driver, 20).until(EC.url_contains("/web/search"))
+            WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located((By.XPATH, "//span[@class='shape-label']"))
+            )                                     # confirm Angular actually bootstrapped
+        except Exception:
+            # diagnose the ACTUAL failing page, right here, right now — not
+            # the /login page from Open Browser & Login, which tells us
+            # nothing about THIS navigation
+            _diag_nav_state(driver, label="(row1 fresh_nav timeout)")
+            raise
         _reassert_devtool_block(driver)        # re-poke once more post-load, cheap insurance
     elif panel_already_open:
         pass
@@ -649,13 +704,56 @@ def _driver_alive(driver) -> bool:
         return False
 
 
-def run_bulk(driver, bulk_df: "pd.DataFrame", progress_cb=None):
-    bulk_start_time = time.perf_counter()
+def run_bulk(driver, bulk_df: "pd.DataFrame", progress_cb=None,
+             run_id: str = None, checkpoint_dir: str = None, resume: bool = True,
+             restart_every: int = 200, rebuild_driver_fn=None):
+    """
+    Full pipeline over every row of a bulk-input DataFrame.
 
-    all_frames = []
+    CRASH-SAFETY: every row's result is appended to a checkpoint CSV on disk
+    (fsynced) the instant it's scraped, plus a progress.json marking the
+    last completed row — see checkpoint.py. If this process dies (power
+    loss, crash, force-quit) at row 3000 of 4000, calling run_bulk again
+    with the SAME bulk_df, SAME run_id, and resume=True (the default)
+    skips rows 1-3000 and continues from 3001 — nothing already scraped is
+    lost or re-fetched. run_id should be a hash of the uploaded file's raw
+    bytes (see app.py) so a resume only matches the SAME input file.
+
+    SPEED-OVER-SCALE FIX: this site's Angular SPA leaks DOM/JS-heap state
+    the longer one tab stays alive across thousands of searches — that's
+    the real cause of "starts fast, crawls after a while", not per-row
+    logic cost. Every `restart_every` rows we force a full fresh navigation
+    (same as row 1) to reset the Angular app state before it degrades.
+    If rebuild_driver_fn is given (zero-arg callable returning a new,
+    already-logged-in driver), we go further and fully quit+relaunch the
+    browser process itself, clearing native Chrome memory bloat too — the
+    profile dir keeps the session so this SHOULD skip re-captcha, but
+    that's unconfirmed for this site, so it defaults to off (None) and we
+    just do the cheap fresh-nav restart instead.
+
+    Returns (inputs_df, all_df, csv_path, progress_path). Caller decides
+    when it's safe to checkpoint.clear_checkpoint(csv_path, progress_path)
+    — e.g. only after the Excel report was built successfully.
+    """
+    checkpoint_dir = checkpoint_dir or os.path.join(CHECKPOINT_DIR, "srk")
+    run_id = run_id or "unkeyed-run"  # caller should always pass a real hash — see app.py
+    csv_path, progress_path = paths_for(checkpoint_dir, run_id)
+
+    last_done = load_progress(progress_path, run_id) if resume else 0
+    if last_done:
+        print(f"[srk][bulk] resuming after row {last_done} (checkpoint: {csv_path})")
+
+    bulk_start_time = time.perf_counter()
     input_records = []
     driver_dead = False
     panel_already_open = False
+    first_processed_row = True  # tracks first row THIS PROCESS actually
+    # runs — NOT literal i==1. On a resume, rows up to last_done are
+    # skip-continued, so i==1 never executes; fresh_nav must fire on
+    # whichever row is first to actually run, or the browser (freshly
+    # opened, sitting on /web/dashboard after manual login) never
+    # navigates to the search page at all and every selector wait times
+    # out hunting for a search panel that was never opened.
 
     for i, (_, row) in enumerate(bulk_df.iterrows(), start=1):
         filters = bulk_row_to_filters(row)
@@ -668,12 +766,30 @@ def run_bulk(driver, bulk_df: "pd.DataFrame", progress_cb=None):
         if progress_cb:
             progress_cb(i, len(bulk_df), filters)
 
+        if i <= last_done:
+            continue  # already scraped + checkpointed in a previous (crashed) run — don't re-fetch
+
         if driver_dead:
             print(f"[srk][bulk] row {i}: skipped, driver already dead")
             continue
 
-        REFRESH_EVERY = 75   # tune down if it still degrades before this
-        fresh = (i == 1) or (i % REFRESH_EVERY == 1)
+        # periodic restart — resets Angular SPA state before it degrades.
+        if restart_every and not first_processed_row and (i % restart_every == 1):
+            if rebuild_driver_fn:
+                print(f"[srk][bulk] row {i}: restart_every hit — relaunching browser")
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+                driver = rebuild_driver_fn()
+                panel_already_open = False
+            else:
+                print(f"[srk][bulk] row {i}: restart_every hit — forcing fresh nav")
+            fresh = True
+        else:
+            fresh = first_processed_row
+
+        first_processed_row = False
 
         try:
             df = run(
@@ -708,16 +824,17 @@ def run_bulk(driver, bulk_df: "pd.DataFrame", progress_cb=None):
 
         panel_already_open = (len(df) == 0)
 
-        df.insert(0, "Input Row", i)
-        all_frames.append(df)
+        append_checkpoint(csv_path, df, i)
+        write_progress(progress_path, i, run_id)
 
-        print(f"[srk][bulk] row {i}: {len(df)} results")
+        print(f"[srk][bulk] row {i}: {len(df)} results (checkpointed)")
 
-    all_df = (
-        pd.concat(all_frames, ignore_index=True)
-        if all_frames
-        else pd.DataFrame(columns=["Input Row"] + SRK_RESULT_COLUMNS)
-    )
+    # Build final all_df from the checkpoint file, not an in-memory list —
+    # this way a resumed run's output includes rows scraped in the EARLIER
+    # (crashed) process too, not just this process's new rows.
+    all_df = load_checkpoint_df(csv_path)
+    if all_df.empty:
+        all_df = pd.DataFrame(columns=["Input Row"] + SRK_RESULT_COLUMNS)
 
     inputs_df = pd.DataFrame(input_records)
 
@@ -730,7 +847,7 @@ def run_bulk(driver, bulk_df: "pd.DataFrame", progress_cb=None):
         f"({total_seconds / 60:.2f} minutes)"
     )
 
-    return inputs_df, all_df
+    return inputs_df, all_df, csv_path, progress_path
 
 def logout(driver, timeout=5):
     """Clean session close before driver.quit() — clicks Logout (id='logoutBox'

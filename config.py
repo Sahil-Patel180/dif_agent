@@ -24,6 +24,13 @@ SRK_PROFILE_DIR = os.getenv(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "browser_profile_srk"),
 )
 
+# Bulk-run checkpoints (crash-safe incremental save + resume) land here —
+# one subfolder per platform, see checkpoint.py.
+CHECKPOINT_DIR = os.getenv(
+    "AGENT_CHECKPOINT_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "checkpoints"),
+)
+
 SELECTORS = {
     "username_field": "#emailUserName",
     "password_field": "#password",
@@ -129,7 +136,16 @@ FLUORESCENCE_OPTIONS = ["", "None", "Very Slight", "Faint / Slight", "Medium", "
 LAB_OPTIONS = ["", "GIA", "GIA DOR", "HRD", "IGI", "AGS", "CGL", "DBIOD", "GCAL", "GHI", "GII"]
 SHOW_ONLY_OPTIONS = ["", "Primary Suppliers"]
 
-SRK_SEARCH_URL = "https://pure.srk.one/web/search/specific-search"
+SRK_LOGIN_URL = "https://pure.srk.one/login"
+SRK_ROOT_URL = "https://pure.srk.one/"
+# Confirmed 09-Sep-2026 from live DOM — actual sidebar nav route is
+# /web/search, not /web/search/specific-search like this constant assumed
+# before. Kept as the canonical "we ended up on the search page" URL.
+SRK_SEARCH_URL = "https://pure.srk.one/web/search"
+
+# Confirmed exact from live DOM (sidebar <a> element):
+# <a ... router-link="search" href="/web/search" title="SPECIFIC SEARCH">
+SRK_SIDEBAR_SEARCH_NAV = "a[href='/web/search']"
 
 SRK_FILTER_LABELS = {
     "clarity": "Clarity",

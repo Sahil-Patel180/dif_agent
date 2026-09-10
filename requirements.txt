@@ -8,3 +8,4 @@ pypdf
 selenium
 setuptools
 undetected-chromedriver
+python-dateutil

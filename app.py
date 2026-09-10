@@ -20,16 +20,27 @@ from dateutil.relativedelta import relativedelta
 from excel_export import build_excel, select_and_rename, SUMMARY_COLUMNS, DETAILS_COLUMNS
 
 from srk_scraper import run as run_srk, run_bulk as run_srk_bulk
+from checkpoint import file_hash, clear_checkpoint
 import undetected_chromedriver as uc
 import traceback
 
 load_dotenv()
 
-# TODO verify: add SRK_LOGIN_URL to config.py (login page URL, not search URL)
+# confirmed manually 09-Sep-2026: https://pure.srk.one/ auto-redirects to
+# https://pure.srk.one/login, so this is the right target, not a guess anymore.
 try:
     from config import SRK_LOGIN_URL
 except ImportError:
-    SRK_LOGIN_URL = "https://pure.srk.one/login"  # placeholder, verify real path
+    SRK_LOGIN_URL = "https://pure.srk.one/login"
+
+# Set this to YOUR installed Chrome's major version (chrome://version, first
+# number before the first dot). Chrome auto-updates itself in the background —
+# every time it bumps past what undetected_chromedriver last matched, you get
+# a driver/browser mismatch again (same as the SessionNotCreatedException
+# from before) and it can present as a silent white screen instead of a
+# clean error, depending on what stage it fails at. Recheck this after every
+# Chrome update.
+SRK_CHROME_VERSION_MAIN = None  # e.g. 152 — fill in, None = let uc guess (risky)
 
 
 def build_manual_login_driver():
@@ -43,13 +54,42 @@ def build_manual_login_driver():
     opts.add_argument("--start-maximized")
     opts.add_argument("--no-first-run")
     opts.add_argument("--no-default-browser-check")
-    opts.page_load_strategy = "eager"  # don't wait for full page load, just DOM ready
-    driver = uc.Chrome(options=opts, log_level=0)
+    # opts.page_load_strategy = "eager"  # don't wait for full page load, just DOM ready
+    # enables driver.get_log("browser") below — without this capability set,
+    # get_log() silently returns [] even when the page threw real JS errors
+    opts.set_capability("goog:loggingPrefs", {"browser": "ALL"})
+
+    uc_kwargs = {"options": opts, "log_level": 0}
+    if SRK_CHROME_VERSION_MAIN:
+        uc_kwargs["version_main"] = SRK_CHROME_VERSION_MAIN
+
+    driver = uc.Chrome(**uc_kwargs)
     driver.maximize_window()
     driver.set_page_load_timeout(60)
     driver.execute_cdp_cmd("Network.enable", {})
-    driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": ["*disable-devtool*"]})
+    # Confirmed 09-Sep-2026 via console diagnostics + screenshot: page DOES
+    # bootstrap fine underneath — the disable-devtool script throws a
+    # full-screen block overlay on top of the working app, which just LOOKS
+    # like a white screen. Blocking the exact confirmed URL is the fix.
+    driver.execute_cdp_cmd(
+        "Network.setBlockedURLs",
+        {"urls": ["*://pure.srk.one/assets/js/disable-devtool.min.js"]},
+    )
     return driver
+
+
+def _diagnose_blank_page(driver, label=""):
+    """Prints to the TERMINAL running `streamlit run app.py` — NOT the
+    Streamlit browser tab. Check the terminal window, not the page, for
+    this output."""
+    try:
+        print(f"[srk][diag]{' ' + label if label else ''} url:", driver.current_url)
+        print(f"[srk][diag] readyState:", driver.execute_script("return document.readyState"))
+        print(f"[srk][diag] body length:", len(driver.execute_script("return document.body.innerHTML")))
+        for entry in driver.get_log("browser"):
+            print(f"[srk][diag][console] {entry.get('level')}: {entry.get('message')}")
+    except Exception as e:
+        print(f"[srk][diag] diagnostic itself failed: {type(e).__name__}: {e}")
 
 st.set_page_config(page_title="Rapaport Discount Agent", layout="centered")
 st.title("Rapaport Discount % Agent")
@@ -170,6 +210,11 @@ elif platform == "SRK":
         "SYMMETRY, FLUORESCENCE, LUSTER, LAB, TOTAL DEPTH From, TOTAL DEPTH To."
     )
     bulk_file = st.file_uploader("Bulk input file", type=["xlsx"], key="bulk_file")
+    resume = st.checkbox(
+        "Resume previous run if it crashed/stopped midway (same file)",
+        value=True,
+        help="If a checkpoint exists for this exact file, already-scraped rows are skipped, not re-fetched.",
+    )
 
     col_c, col_d = st.columns(2)
     if col_c.button("1. Open Browser & Login (bulk)"):
@@ -180,7 +225,9 @@ elif platform == "SRK":
                 pass
         st.session_state.srk_driver = build_manual_login_driver()
         st.session_state.srk_driver.get(SRK_LOGIN_URL)
-        st.info("Browser window opened. Log in + solve captcha there, then click step 2 below.")
+        _diagnose_blank_page(st.session_state.srk_driver, label="(bulk open)")
+        st.info("Browser window opened. Log in + solve captcha there, then click step 2 below. "
+                "If the window is white, check the TERMINAL (not this page) for [srk][diag] lines.")
 
     run_bulk_clicked = col_d.button("2. I've Logged In → Run Bulk")
 
@@ -190,7 +237,9 @@ elif platform == "SRK":
         elif bulk_file is None:
             st.error("Upload agent_srk_bulkinput.xlsx first.")
         else:
-            bulk_df = pd.read_excel(bulk_file)
+            raw_bytes = bulk_file.getvalue()
+            run_id = file_hash(raw_bytes)
+            bulk_df = pd.read_excel(io.BytesIO(raw_bytes))
             bulk_input_df = bulk_df.copy()
             bulk_input_df.insert(
                 0,
@@ -213,8 +262,9 @@ elif platform == "SRK":
 
             with st.spinner("Running bulk search..."):
                 try:
-                    inputs_df, all_df = run_srk_bulk(
-                        st.session_state.srk_driver, bulk_df, progress_cb=_progress_cb
+                    inputs_df, all_df, checkpoint_csv_path, checkpoint_progress_path = run_srk_bulk(
+                        st.session_state.srk_driver, bulk_df, progress_cb=_progress_cb,
+                        run_id=run_id, resume=resume,
                     )
                 except Exception as e:
                     traceback.print_exc()
@@ -231,15 +281,6 @@ elif platform == "SRK":
                         pass
                     if "srk_driver" in st.session_state:
                         del st.session_state.srk_driver
-
-            # right after the "with st.spinner(...)" block finishes (after line 234), before line 235:
-            import os
-            output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bulk_outputs")
-            os.makedirs(output_dir, exist_ok=True)
-            saved_path = os.path.join(
-                output_dir,
-                f"srk_bulk_report_{(company_name or 'company').replace(' ', '_')}_{pd.Timestamp.now():%Y%m%d_%H%M%S}.xlsx",
-            )
 
             st.subheader(f"Bulk Results ({len(all_df)} rows across {len(inputs_df)} input sets)")
             st.dataframe(all_df)
@@ -267,33 +308,68 @@ elif platform == "SRK":
             )
             st.dataframe(not_found_df)
 
-            try:
-                bulk_buffer = io.BytesIO()
-                with pd.ExcelWriter(bulk_buffer, engine="openpyxl") as writer:
-                    inputs_df.to_excel(writer, index=False, sheet_name="INPUTS")
-                    all_df.to_excel(writer, index=False, sheet_name="ALL")
-                    not_found_df.to_excel(writer, index=False, sheet_name="NOT FOUND")
-                    for sheet_name in ("INPUTS", "ALL", "NOT FOUND"):
-                        ws = writer.sheets[sheet_name]
-                        for cell in ws[1]:
-                            cell.font = Font(name="Arial", bold=True)
-                        for col_cells in ws.columns:
-                            width = max(len(str(c.value)) if c.value is not None else 0 for c in col_cells) + 2
-                            ws.column_dimensions[col_cells[0].column_letter].width = min(width, 40)
+            bulk_buffer = io.BytesIO()
 
-                with open(saved_path, "wb") as f:
-                    f.write(bulk_buffer.getvalue())
-                st.success(f"Also saved to disk regardless of browser state: {saved_path}")
+            with pd.ExcelWriter(
+                bulk_buffer,
+                engine="openpyxl"
+            ) as writer:
 
-                st.download_button(
-                    "Download Bulk Excel Report",
-                    data=bulk_buffer.getvalue(),
-                    file_name=f"srk_bulk_report_{(company_name or 'company').replace(' ', '_')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                inputs_df.to_excel(
+                    writer,
+                    index=False,
+                    sheet_name="INPUTS"
                 )
-            except Exception as e:
-                traceback.print_exc()
-                st.error(f"Excel build/save failed: {e}")
+
+                all_df.to_excel(
+                    writer,
+                    index=False,
+                    sheet_name="ALL"
+                )
+
+                not_found_df.to_excel(
+                    writer,
+                    index=False,
+                    sheet_name="NOT FOUND"
+                )
+
+                for sheet_name in (
+                    "INPUTS",
+                    "ALL",
+                    "NOT FOUND",
+                ):
+                    ws = writer.sheets[sheet_name]
+
+                    # Bold header
+                    for cell in ws[1]:
+                        cell.font = Font(
+                            name="Arial",
+                            bold=True
+                        )
+
+                    # Auto-size columns
+                    for col_cells in ws.columns:
+                        width = max(
+                            len(str(c.value))
+                            if c.value is not None
+                            else 0
+                            for c in col_cells
+                        ) + 2
+
+                        ws.column_dimensions[
+                            col_cells[0].column_letter
+                        ].width = min(width, 40)
+
+            st.download_button(
+                "Download Bulk Excel Report",
+                data=bulk_buffer.getvalue(),
+                file_name=f"srk_bulk_report_{(company_name or 'company').replace(' ', '_')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
+            if st.button("Clear checkpoint (all rows done, start fresh next time)"):
+                clear_checkpoint(checkpoint_csv_path, checkpoint_progress_path)
+                st.success("Checkpoint cleared.")
     st.divider()
     st.subheader("Filters")
     shape = st.selectbox("Shape", ["Round", "Oval", "Pear", "Emerald", "L Radiant",
@@ -334,7 +410,9 @@ elif platform == "SRK":
                 pass
         st.session_state.srk_driver = build_manual_login_driver()
         st.session_state.srk_driver.get(SRK_LOGIN_URL)
-        st.info("Browser window opened. Log in + solve captcha there, then click step 2 below.")
+        _diagnose_blank_page(st.session_state.srk_driver, label="(single open)")
+        st.info("Browser window opened. Log in + solve captcha there, then click step 2 below. "
+                "If the window is white, check the TERMINAL (not this page) for [srk][diag] lines.")
 
     run_clicked = col_b.button("2. I've Logged In → Run Search")
 
