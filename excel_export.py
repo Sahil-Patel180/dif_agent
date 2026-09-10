@@ -1,20 +1,8 @@
 """
-excel_export.py — build downloadable Excel report (Summary + Details).
-Summary sheet gets From/To Date header rows (rows 1-2) above the table
-(row 4), matching report layout.
+excel_export.py — build downloadable Excel report (Details only, no Summary sheet).
 """
 from io import BytesIO
-from datetime import date
 import pandas as pd
-
-SUMMARY_COLUMNS = {
-    "Company": "Company",
-    "Location": "Location",
-    "Vendor Stock #": "Vendor stock #",
-    "Max Discount %": "Max discount",
-    "Report Date": "Report date",
-    "Key to Symbols": "Key to symbols",
-}
 
 DETAILS_COLUMNS = {
     "Company": "Company",
@@ -45,33 +33,23 @@ def select_and_rename(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
     return df[cols_present].rename(columns=mapping)
 
 
-def _write_summary_with_dates(writer, summary_df, report_date_from: date, report_date_to: date):
-    """Rows 1-2: From/To Date. Row 3: blank. Row 4+: table (startrow=3, 0-idx)."""
-    ws_name = "Summary"
-    summary_out = select_and_rename(summary_df, SUMMARY_COLUMNS)
-    summary_out.to_excel(writer, sheet_name=ws_name, index=False, startrow=3)
-
-    ws = writer.sheets[ws_name]
-    ws["A1"] = "From Date"
-    ws["B1"] = report_date_from.strftime("%d-%m-%Y")
-    ws["A2"] = "To Date"
-    ws["B2"] = report_date_to.strftime("%d-%m-%Y")
+def _add_fixed_columns(details_out: pd.DataFrame) -> pd.DataFrame:
+    """Shade & Luster aren't scraped from Rapaport — fixed constant values per spec."""
+    details_out["Shade"] = "None"
+    details_out["Luster"] = "Ex"
+    return details_out
 
 
-def build_excel(summary_df: pd.DataFrame, df: pd.DataFrame,
-                 report_date_from: date, report_date_to: date) -> BytesIO:
+def build_excel(df: pd.DataFrame) -> BytesIO:
     output = BytesIO()
-    details_out = select_and_rename(df, DETAILS_COLUMNS)
+    details_out = _add_fixed_columns(select_and_rename(df, DETAILS_COLUMNS))
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        _write_summary_with_dates(writer, summary_df, report_date_from, report_date_to)
         details_out.to_excel(writer, sheet_name="Details", index=False)
     output.seek(0)
     return output
 
 
-def save_excel(summary_df: pd.DataFrame, df: pd.DataFrame, path: str,
-               report_date_from: date, report_date_to: date):
-    details_out = select_and_rename(df, DETAILS_COLUMNS)
+def save_excel(df: pd.DataFrame, path: str):
+    details_out = _add_fixed_columns(select_and_rename(df, DETAILS_COLUMNS))
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
-        _write_summary_with_dates(writer, summary_df, report_date_from, report_date_to)
         details_out.to_excel(writer, sheet_name="Details", index=False)

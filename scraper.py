@@ -23,7 +23,7 @@ from playwright.sync_api import sync_playwright
 import pandas as pd
 
 from config import (
-    LOGIN_URL, SELECTORS, RESULT_COLUMNS, PROFILE_DIR,
+    LOGIN_URL, SELECTORS, RESULT_COLUMNS, PROFILE_DIR, NO_BGM_LABEL,
     shape_label, color_label, clarity_label,
     fluorescence_label, lab_label, finish_quick_button, show_only_label,
 )
@@ -76,8 +76,8 @@ def expand_measurements_if_needed(page):
 
 def apply_filters(page, filters: dict):
     """
-    Applied in this exact order: Shape, Size, Color, Clarity, Finish,
-    Fluorescence, Grading Report, Show Only, Depth% (Measurements).
+    Applied in this exact order: Shape, Size, Color, Clarity, No BGM,
+    Finish, Fluorescence, Grading Report, Show Only, Depth% (Measurements).
 
     filters dict keys expected:
       shape: str (e.g. 'Round')
@@ -113,6 +113,9 @@ def apply_filters(page, filters: dict):
         page.click(clarity_label(filters["clarity_min"]))
     if filters.get("clarity_max") and filters["clarity_max"] != filters.get("clarity_min"):
         page.click(clarity_label(filters["clarity_max"]))
+
+    # 4b. No BGM — always forced on, not user-toggleable
+    page.click(NO_BGM_LABEL)
 
     # 5. Finish (Cut+Polish+Symmetry quick preset)
     if filters.get("finish"):
@@ -328,37 +331,10 @@ def scrape_results(page, context, include_report_date: bool = False) -> pd.DataF
     return pd.DataFrame(records)
 
 
-def compute_company_summary(df: pd.DataFrame) -> pd.DataFrame:
-    """Per company: row w/ deepest discount (most negative %Rap value).
-    That row's Location, Vendor Stock #, Report Date, Key to Symbols
-    ride along as the 'Max Discount' row for the company."""
-    cols = ["Company", "Location", "Vendor Stock #", "Max Discount %",
-            "Report Date", "Key to Symbols"]
-    if df.empty:
-        return pd.DataFrame(columns=cols)
-
-    work = df.copy()
-    disc_col = "%Rap (Back Discount)"
-    work["_Discount"] = pd.to_numeric(
-        work[disc_col].astype(str).str.extract(r"(-?\d+\.?\d*)\s*%?")[0],
-        errors="coerce",
-    )
-    work = work.dropna(subset=["_Discount"])
-
-    idx_deepest = work.groupby("Company")["_Discount"].idxmin()  # most -ve = deepest
-    summary = work.loc[idx_deepest, [
-        "Company", "Location", "Vendor Stock #", "_Discount",
-        "Report Date", "Key to Symbols",
-    ]].rename(columns={"_Discount": "Max Discount %"})
-
-    return summary[cols].sort_values("Company").reset_index(drop=True)
-
-
 def run(username: str, password: str, company_name: str, filters: dict,
         headless: bool = True, include_report_date: bool = False):
     """
-    Full pipeline: login -> filter -> scrape (all pages) -> per-company
-    summary. Returns (summary_df, details_dataframe)
+    Full pipeline: login -> filter -> scrape (all pages). Returns df.
 
     Runs inside a dedicated thread with the Proactor event loop policy set
     explicitly (Windows fix — see module docstring). Safe no-op on
@@ -391,5 +367,4 @@ def _run_impl(username: str, password: str, company_name: str, filters: dict,
         finally:
             context.close()
 
-    summary_df = compute_company_summary(df)
-    return summary_df, df
+    return df

@@ -112,6 +112,19 @@ def show_only_label(option_name: str) -> str:
     return f"label[for='{suffix}']"
 
 
+def find_range(value: float, ranges: list[tuple[float, float]]) -> tuple[float, float] | None:
+    """Find the bucket whose From or To exactly equals value; else the
+    bucket that CONTAINS value. Used to auto-settle the other side of a
+    From/To pair once the user types one number (carat or depth%)."""
+    for lo, hi in ranges:
+        if value in (lo, hi):
+            return (lo, hi)
+    for lo, hi in ranges:
+        if lo <= value <= hi:
+            return (lo, hi)
+    return None
+
+
 # visual column order in the results grid (from live screenshot header row)
 RESULT_COLUMNS = [
     "Seller", "Status", "Rating", "Location", "Shape", "Size", "Color",
@@ -127,14 +140,39 @@ RESULT_COLUMNS = [
 # click needed for that one.
 EXPANDED_DETAIL_FIELDS = ["Report Date", "Report Comment"]
 
-SHAPE_OPTIONS = ["", "Round", "Pear", "Oval", "Marquise", "Heart", "Radiant",
+SHAPE_OPTIONS = ["Round", "Pear", "Oval", "Marquise", "Heart", "Radiant",
                   "Princess", "Emerald", "Asscher", "Sq. Emerald"]
-GRADE_OPTIONS = ["", "3X", "EX-", "VG+", "VG-"]  # quick Finish presets (Cut+Pol+Sym together)
-COLOR_OPTIONS = ["", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M"]
-CLARITY_OPTIONS = ["", "FL", "IF", "VVS1", "VVS2", "VS1", "VS2", "SI1", "SI2", "I1"]
-FLUORESCENCE_OPTIONS = ["", "None", "Very Slight", "Faint / Slight", "Medium", "Strong", "Very Strong"]
-LAB_OPTIONS = ["", "GIA", "GIA DOR", "HRD", "IGI", "AGS", "CGL", "DBIOD", "GCAL", "GHI", "GII"]
-SHOW_ONLY_OPTIONS = ["", "Primary Suppliers"]
+GRADE_OPTIONS = ["3X", "EX-", "VG+", "VG-"]
+COLOR_OPTIONS = ["D", "E", "F", "G", "H", "I", "J", "K", "L", "M"]
+CLARITY_OPTIONS = ["FL", "IF", "VVS1", "VVS2", "VS1", "VS2", "SI1", "SI2", "I1"]
+FLUORESCENCE_OPTIONS = ["None", "Very Slight", "Faint / Slight", "Medium", "Strong", "Very Strong"]
+LAB_OPTIONS = ["GIA", "GIA DOR", "HRD", "IGI", "AGS", "CGL", "DBIOD", "GCAL", "GHI", "GII"]
+SHOW_ONLY_OPTIONS = ["Primary Suppliers"]
+
+# Confirmed exact from live DOM (checkbox input under clarity section):
+# <input id="filter.includedShade.noBGM" name="filter.includedShade.noBGM" type="checkbox" ...>
+NO_BGM_LABEL = "label[for='filter.includedShade.noBGM']"
+
+# Size ranges — confirmed from image. Seeds the carat From/To auto-settle
+# in app.py; user still types a number, this just supplies the buckets.
+CARAT_RANGES = [
+    (1.00, 1.00), (1.01, 1.19), (1.20, 1.24), (1.25, 1.29), (1.30, 1.34),
+    (1.35, 1.39), (1.40, 1.44), (1.45, 1.49), (1.50, 1.50), (1.51, 1.69),
+    (1.70, 1.79), (1.80, 1.89), (1.90, 1.95), (1.96, 1.99), (2.00, 2.00),
+    (2.01, 2.24), (2.25, 2.49), (2.50, 2.59), (2.60, 2.69), (2.70, 2.79),
+    (2.80, 2.89), (2.90, 2.99), (3.00, 3.00), (3.01, 3.49), (3.50, 3.69),
+    (3.70, 3.89), (3.90, 3.99), (4.00, 4.00), (4.01, 4.49), (4.50, 4.69),
+    (4.70, 4.79), (4.80, 4.89), (4.90, 4.99), (5.00, 5.00), (5.01, 5.24),
+    (5.25, 5.49), (5.50, 5.69), (5.70, 5.89), (5.85, 5.99),
+]
+
+# Total depth% ranges — confirmed from image (last two rows overlap:
+# 5.70–5.89 then 5.85–5.99 — transcribed exactly as shown, your call to fix
+# if that's a typo on the source sheet). Seeds the depth From/To auto-settle.
+DEPTH_RANGES = [
+    (58.0, 58.9), (59.0, 59.9), (60.0, 60.9), (61.0, 61.9), (62.0, 62.9),
+    (63.0, 63.9), (64.0, 64.9), (65.0, 65.9), (66.0, 66.9),
+]
 
 SRK_LOGIN_URL = "https://pure.srk.one/login"
 SRK_ROOT_URL = "https://pure.srk.one/"
