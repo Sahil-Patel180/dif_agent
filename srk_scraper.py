@@ -589,8 +589,15 @@ def run(driver, filters: dict, fetch_video=True, fresh_nav=True, panel_already_o
         reset_search(driver)
         return pd.DataFrame(columns=SRK_RESULT_COLUMNS)
 
-    run_search(driver, wait_for_new_results=not fresh_nav)
-    return parse_results(driver, fetch_video=fetch_video)
+    # Scale the results-wait with how many diamonds actually matched — a
+    # few-thousand-stone hit genuinely takes longer for SRK's backend to
+    # return and for the grid to render than a 3-row hit, flat 15s was
+    # timing out on the big ones. Capped at 60s so a real failure still
+    # surfaces instead of hanging forever.
+    result_timeout = min(60, 15 + (count or 0) // 300 * 5)
+
+    run_search(driver, wait_for_new_results=not fresh_nav, timeout=result_timeout)
+    return parse_results(driver, fetch_video=fetch_video, timeout=result_timeout)
 
 
 # ---- bulk (multi-input-set) support -----------------------------------------
