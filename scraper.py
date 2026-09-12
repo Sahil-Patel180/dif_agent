@@ -36,6 +36,7 @@ import pandas as pd
 
 from config import (
     LOGIN_URL, SELECTORS, RESULT_COLUMNS, PROFILE_DIR, NO_BGM_LABEL, CHECKPOINT_DIR,
+    COLOR_MORE_BUTTON, COLOR_BEHIND_MORE,
     shape_label, color_label, clarity_label,
     fluorescence_label, lab_label, finish_quick_button, show_only_label,
 )
@@ -90,6 +91,20 @@ def expand_measurements_if_needed(page):
     page.wait_for_selector(SELECTORS["depth_percent_from"], timeout=15000)
 
 
+def expand_color_more_if_needed(page, letters):
+    """Colour picker paints D..M only; N..Z mount behind the "More" button.
+    Clicking label[for='filter.color.N'] before that just times out, since
+    the element isn't in the DOM at all. Only pressed when one of the
+    requested letters actually needs it, and only once (pressing again
+    collapses the list back down)."""
+    if not any(l in COLOR_BEHIND_MORE for l in letters if l):
+        return
+    if page.query_selector(color_label("N")) is not None:
+        return  # already expanded
+    page.click(COLOR_MORE_BUTTON)
+    page.wait_for_selector(color_label("Z"), timeout=15000)
+
+
 def apply_filters(page, filters: dict):
     """
     Applied in this exact order: Shape, Size, Color, Clarity, No BGM,
@@ -118,7 +133,9 @@ def apply_filters(page, filters: dict):
     if filters.get("carat_max") is not None:
         page.fill(SELECTORS["carat_to_input"], str(filters["carat_max"]))
 
-    # 3. Color
+    # 3. Color — expand the picker first if any requested letter is one of
+    # the ones hidden behind "More" (N..Z).
+    expand_color_more_if_needed(page, [filters.get("color_min"), filters.get("color_max")])
     if filters.get("color_min"):
         page.click(color_label(filters["color_min"]))
     if filters.get("color_max") and filters["color_max"] != filters.get("color_min"):

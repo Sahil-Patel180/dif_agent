@@ -145,14 +145,22 @@ if platform == "Rapaport":
     # 7. Grading Report
     lab = st.selectbox("Grading Report / Lab", LAB_OPTIONS, index=LAB_OPTIONS.index("GIA"))
 
-    # 7b. Report Date range
-    st.caption("Report Date range")
-    rd1, rd2 = st.columns(2)
-    report_date_from = rd1.date_input("From Date", value=date(2024, 1, 1))
-    report_date_to = rd2.date_input("To Date", value=date.today())
+    # 7b. Report Date range — OPTIONAL, same pattern as Depth% below.
+    # Unchecked means the filter is not sent at all (None), so the site
+    # returns every report date instead of silently clamping to 2024-today.
+    use_report_date = st.checkbox("Filter by Report Date range", value=False)
+    report_date_from = report_date_to = None
+    if use_report_date:
+        st.caption("Report Date range")
+        rd1, rd2 = st.columns(2)
+        report_date_from = rd1.date_input("From Date", value=date(2024, 1, 1))
+        report_date_to = rd2.date_input("To Date", value=date.today())
 
-    # 8. Show Only
-    show_only = st.selectbox("Show Only", SHOW_ONLY_OPTIONS, index=0)
+    # 8. Show Only — OPTIONAL. Unchecked = no Show Only chip applied.
+    use_show_only = st.checkbox("Filter by Show Only", value=False)
+    show_only = None
+    if use_show_only:
+        show_only = st.selectbox("Show Only", SHOW_ONLY_OPTIONS, index=0)
 
     # 9. Depth% — optional. When on: give either From or To, other
     # auto-settles to the matching bucket in DEPTH_RANGES (config.py)

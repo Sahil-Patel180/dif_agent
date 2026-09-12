@@ -143,10 +143,25 @@ EXPANDED_DETAIL_FIELDS = ["Report Date", "Report Comment"]
 SHAPE_OPTIONS = ["Round", "Pear", "Oval", "Marquise", "Heart", "Radiant",
                   "Princess", "Emerald", "Asscher", "Sq. Emerald"]
 GRADE_OPTIONS = ["3X", "EX-", "VG+", "VG-"]
-COLOR_OPTIONS = ["D", "E", "F", "G", "H", "I", "J", "K", "L", "M"]
-CLARITY_OPTIONS = ["FL", "IF", "VVS1", "VVS2", "VS1", "VS2", "SI1", "SI2", "I1"]
+# Full white-colour scale. D-M are painted immediately; N-Z only mount
+# after the "More" button under the colour picker is clicked — see
+# COLOR_MORE_BUTTON / COLOR_BEHIND_MORE below.
+COLOR_OPTIONS = ["D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O",
+                  "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"]
+
+# Confirmed from live DOM: the colour picker only renders D..M until this
+# button is pressed, so label[for='filter.color.N'] and everything after it
+# simply doesn't exist in the DOM yet and a click on it times out. Scoped
+# to the colour section — clarity has a button with the same class.
+COLOR_MORE_BUTTON = ("div[class*='color__StyledFromToPicker'] "
+                     "button[class*='box-picker-from-to__More']")
+COLOR_BEHIND_MORE = ["N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"]
+
+CLARITY_OPTIONS = ["FL", "IF", "VVS1", "VVS2", "VS1", "VS2", "SI1", "SI2",
+                    "SI3", "I1", "I2", "I3"]
 FLUORESCENCE_OPTIONS = ["None", "Very Slight", "Faint / Slight", "Medium", "Strong", "Very Strong"]
-LAB_OPTIONS = ["GIA", "GIA DOR", "HRD", "IGI", "AGS", "CGL", "DBIOD", "GCAL", "GHI", "GII"]
+LAB_OPTIONS = ["GIA", "GIA DOR", "HRD", "IGI", "AGS", "CGL", "DBIOD", "GCAL",
+                "GHI", "GII", "GSI", "NGTC", "PGS", "RAP", "RDC", "SGL"]
 SHOW_ONLY_OPTIONS = ["Primary Suppliers"]
 
 # Confirmed exact from live DOM (checkbox input under clarity section):
