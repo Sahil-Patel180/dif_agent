@@ -200,8 +200,41 @@ SRK_SEARCH_URL = "https://pure.srk.one/web/search"
 # <a ... router-link="search" href="/web/search" title="SPECIFIC SEARCH">
 SRK_SIDEBAR_SEARCH_NAV = "a[href='/web/search']"
 
-SRK_FILTER_LABELS = {
-    "clarity": "Clarity",
+# SRK Colour / Clarity as ORDERED scales, so the UI can offer a From/To
+# pair (like Rapaport) instead of one single value. SRK's own page has no
+# range control — these are plain multi-select chips — so the app expands
+# the chosen range into every value between the two ends and clicks each
+# chip. Order below IS the grading order; don't re-sort it.
+# Chip text must match the site's aria-label exactly.
+SRK_COLOUR_SCALE = ["D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N-Z"]
+SRK_CLARITY_SCALE = ["FL", "IF", "VVS1", "VVS2", "VS1", "VS2", "SI1", "SI2",
+                      "SI3", "I1", "I2", "I3"]
+
+# Sentinel shown at the top of both From and To pickers. "All" on either
+# side means "don't filter on this at all" — SRK returns everything when no
+# chip is selected, so the correct action is to click nothing.
+SRK_RANGE_ALL = "All"
+
+
+def expand_scale_range(scale: list[str], from_val: str, to_val: str) -> list[str]:
+    """Turn a From/To pair into the list of chips to click.
+
+    'All' (or blank) on either end -> [] meaning leave the filter untouched.
+    Reversed input (From=SI2, To=VVS1) is swapped rather than returning an
+    empty list, so a mis-ordered pick still does the sensible thing."""
+    if not from_val or not to_val:
+        return []
+    if from_val == SRK_RANGE_ALL or to_val == SRK_RANGE_ALL:
+        return []
+    if from_val not in scale or to_val not in scale:
+        return []
+    i, j = scale.index(from_val), scale.index(to_val)
+    if i > j:
+        i, j = j, i
+    return scale[i:j + 1]
+
+
+SRK_FILTER_LABELS = {    "clarity": "Clarity",
     "colour": "Colour",
     "cut": "Cut",
     "polish": "Polish",

@@ -9,6 +9,7 @@ import pandas as pd
 from config import (
     SRK_SEARCH_URL, SRK_ROOT_URL, SRK_SIDEBAR_SEARCH_NAV,
     SRK_FILTER_LABELS, SRK_COLUMN_MAP, SRK_RESULT_COLUMNS,
+    SRK_COLOUR_SCALE, SRK_CLARITY_SCALE, SRK_RANGE_ALL, expand_scale_range,
     CHECKPOINT_DIR,
 )
 from checkpoint import (
@@ -125,12 +126,55 @@ def apply_total_depth_range(driver, from_val, to_val):
         print(f"[srk][debug] depth toValue readback={el.get_attribute('value')!r} (wanted {to_val})")
 
 
+# Colour and Clarity are graded SCALES, so callers can hand over a From/To
+# pair instead of listing every value. SRK's own page has no range control —
+# they're plain multi-select chips — so the pair gets expanded here into
+# every value between the two ends and each chip is clicked in turn.
+# Order lives in config.SRK_COLOUR_SCALE / SRK_CLARITY_SCALE.
+SRK_RANGE_FILTERS = {
+    "clarity": SRK_CLARITY_SCALE,
+    "colour": SRK_COLOUR_SCALE,
+}
+
+
+def resolve_range_filters(filters: dict) -> dict:
+    """Normalise clarity/colour into plain chip lists before clicking.
+
+    Accepts either form, so nothing that already worked breaks:
+      - filters['clarity'] = 'VVS1' or ['VVS1','VVS2']  -> used as-is
+      - filters['clarity_from'] / ['clarity_to']        -> expanded to a range
+
+    'All' (or a blank end) means the filter isn't applied at all — SRK
+    returns everything when no chip in a section is selected."""
+    resolved = dict(filters)
+    for key, scale in SRK_RANGE_FILTERS.items():
+        if resolved.get(key):
+            continue  # explicit list/value wins over the From/To pair
+        from_val = _clean(resolved.get(f"{key}_from"))
+        to_val = _clean(resolved.get(f"{key}_to"))
+        if not from_val and not to_val:
+            continue
+        # One end left blank/'All' but the other set: treat the blank end as
+        # the far end of the scale rather than silently dropping the filter.
+        if not from_val or from_val == SRK_RANGE_ALL:
+            from_val = scale[0] if to_val and to_val != SRK_RANGE_ALL else SRK_RANGE_ALL
+        if not to_val or to_val == SRK_RANGE_ALL:
+            to_val = scale[-1] if from_val != SRK_RANGE_ALL else SRK_RANGE_ALL
+        values = expand_scale_range(scale, from_val, to_val)
+        if values:
+            resolved[key] = values
+            print(f"[srk] {key} range {from_val}-{to_val} -> {values}")
+    return resolved
+
+
 def apply_filters(driver, filters: dict):
     """
     filters keys: shape, carat_from, carat_to, clarity, colour, shade,
     cut, polish, symmetry, fluorescence, luster, lab,
     total_depth_from, total_depth_to
     """
+    filters = resolve_range_filters(filters)
+
     if filters.get("shape"):
         print(f"[srk] applying shape={filters['shape']}")
         apply_shape(driver, filters["shape"])
@@ -184,13 +228,22 @@ def reset_search(driver, timeout=10):
     print("[srk] reset_search: no Reset button found yet (no search submitted) — no-op")
 
 
-def get_preview_count(driver, timeout=1.5):
-    """Read SRK live result count with a short JS poll.
+def get_preview_count(driver, timeout=6.0, settle=0.6):
+    """Read SRK live result count, waiting for it to SETTLE.
 
-    Main speed fix for empty searches: the old Selenium WebDriverWait could
-    sit for up to 5 seconds waiting for #searchfooter label. Reading the DOM
-    directly is much cheaper and lets us detect 0-result inputs quickly.
-    Returns int or None when count is not available yet.
+    Reading the DOM directly (rather than a Selenium WebDriverWait on
+    #searchfooter label) is still the fast path. What changed: the count is
+    recomputed asynchronously after every chip click, so the old 1.5s
+    snapshot could read a STALE number — or nothing at all — and return
+    None. None is not 0, so run() sailed past its zero-result guard, clicked
+    Search on a search that matches nothing, and then sat in
+    EC.url_contains("search-result") until it timed out. Clicking a whole
+    clarity/colour RANGE (6+ chips instead of 2) made that race much easier
+    to lose.
+
+    Now: poll until the same value has been seen continuously for `settle`
+    seconds, then return it. Returns int, or None if the footer never
+    produced a number within `timeout`.
     """
     import re
     script = """
@@ -198,18 +251,88 @@ def get_preview_count(driver, timeout=1.5):
         return el ? (el.innerText || el.textContent || '').trim() : '';
     """
     deadline = time.monotonic() + timeout
+    stable_value = None
+    stable_since = None
     last_text = ''
     while time.monotonic() < deadline:
         try:
-            text = driver.execute_script(script) or ''
-            last_text = text.strip()
-            m = re.search(r"(\d+)", last_text)
-            if m:
-                return int(m.group(1))
+            text = (driver.execute_script(script) or '').strip()
+            last_text = text
+            # Thousand separators must go before int() — "1,234 Stones"
+            # otherwise parses as 1 and every downstream size calculation is
+            # wrong.
+            m = re.search(r"([\d,]+)", text)
+            value = int(m.group(1).replace(",", "")) if m else None
+        except Exception:
+            value = None
+
+        if value is not None:
+            if value == stable_value:
+                if time.monotonic() - stable_since >= settle:
+                    return value
+            else:
+                stable_value = value
+                stable_since = time.monotonic()
+        time.sleep(0.08)
+
+    if stable_value is not None:
+        return stable_value  # never settled, but a number was seen — use the last one
+    print(f"[srk] preview count unreadable (footer text={last_text!r})")
+    return None
+
+
+def _click_search_button(driver, timeout=15):
+    """Click the real submit control.
+
+    Confirmed DOM: the submit button is id='searchBtn' — the SAME element
+    reset_search() targets, whose label just flips to 'Reset Search' once a
+    search has been run. The old locator here was
+    //button[normalize-space(text())='Search'], which is fragile: the label
+    sits inside a child span, so normalize-space(text()) is empty on the
+    real button and the xpath matched some other inert 'Search' element.
+    Result: element_to_be_clickable passed, .click() did nothing, no
+    navigation ever happened, and the caller timed out with a healthy
+    500-stone preview count on screen.
+    """
+    xpath = "//button[@id='searchBtn' and not(contains(normalize-space(.),'Reset'))]"
+    try:
+        btn = WebDriverWait(driver, timeout).until(
+            EC.element_to_be_clickable((By.XPATH, xpath))
+        )
+    except Exception:
+        # Fall back to the old text match rather than failing outright — if
+        # the id ever changes this keeps working.
+        btn = WebDriverWait(driver, timeout).until(
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(normalize-space(.),'Search')]"))
+        )
+
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+    time.sleep(0.15)
+    try:
+        btn.click()
+    except Exception:
+        # Chip clicks can leave an overlay/tooltip covering the footer; a JS
+        # click bypasses the intercept check.
+        driver.execute_script("arguments[0].click();", btn)
+    print(f"[srk] search submitted (btn id={btn.get_attribute('id')!r})")
+
+
+def _results_ready(driver, timeout):
+    """Search is done when EITHER the route changes to /search-result OR the
+    grid paints cells. Waiting only on the URL was too strict — the SPA
+    sometimes renders results in place without a route change, which read as
+    a failure even though data was right there."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if "search-result" in (driver.current_url or ""):
+                return True
+            if driver.find_elements(By.TAG_NAME, "igx-grid-cell"):
+                return True
         except Exception:
             pass
-        time.sleep(0.08)
-    return None
+        time.sleep(0.2)
+    return False
 
 
 def run_search(driver, timeout=15, wait_for_new_results=False):
@@ -217,6 +340,9 @@ def run_search(driver, timeout=15, wait_for_new_results=False):
     never changes (still /search-result from the previous run) so url_contains is
     a no-op check. Instead, grab a cell that belongs to the OLD result set before
     clicking, then wait for it to go stale — that's the real signal new data landed.
+
+    Returns True when results are up, False when nothing came back (caller
+    treats that as an empty result set instead of crashing the run).
     """
     old_cell = None
     if wait_for_new_results:
@@ -225,18 +351,21 @@ def run_search(driver, timeout=15, wait_for_new_results=False):
         except Exception:
             old_cell = None
 
-    btn = WebDriverWait(driver, timeout).until(
-        EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(text())='Search']"))
-    )
-    btn.click()
+    _click_search_button(driver, timeout=timeout)
 
     if wait_for_new_results and old_cell is not None:
         try:
             WebDriverWait(driver, timeout).until(EC.staleness_of(old_cell))
         except Exception:
             pass  # grid may re-use DOM nodes in place; fall through, scan will still run
-    else:
-        WebDriverWait(driver, timeout).until(EC.url_contains("search-result"))
+        return True
+
+    if _results_ready(driver, timeout):
+        return True
+
+    print(f"[srk] no results within {timeout}s (url={driver.current_url!r}) — "
+          f"treating as 0 results")
+    return False
 
 
 def get_video_link(driver, row_element, timeout=10):
@@ -583,7 +712,8 @@ def run(driver, filters: dict, fetch_video=True, fresh_nav=True, panel_already_o
 
     apply_filters(driver, filters)
 
-    count = get_preview_count(driver, timeout=1.5)
+    count = get_preview_count(driver)
+    print(f"[srk] preview count = {count}")
     if count == 0:
         print("[srk] preview count = 0 — resetting now, moving to next input set")
         reset_search(driver)
@@ -596,7 +726,10 @@ def run(driver, filters: dict, fetch_video=True, fresh_nav=True, panel_already_o
     # surfaces instead of hanging forever.
     result_timeout = min(60, 15 + (count or 0) // 300 * 5)
 
-    run_search(driver, wait_for_new_results=not fresh_nav, timeout=result_timeout)
+    if not run_search(driver, wait_for_new_results=not fresh_nav, timeout=result_timeout):
+        reset_search(driver)
+        return pd.DataFrame(columns=SRK_RESULT_COLUMNS)
+
     return parse_results(driver, fetch_video=fetch_video, timeout=result_timeout)
 
 

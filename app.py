@@ -14,6 +14,7 @@ from config import (
     SHAPE_OPTIONS, GRADE_OPTIONS, COLOR_OPTIONS,
     CLARITY_OPTIONS, FLUORESCENCE_OPTIONS, LAB_OPTIONS, SHOW_ONLY_OPTIONS,
     CARAT_RANGES, DEPTH_RANGES, find_range,
+    SRK_COLOUR_SCALE, SRK_CLARITY_SCALE, SRK_RANGE_ALL, expand_scale_range,
 )
 
 from datetime import date
@@ -413,9 +414,24 @@ elif platform == "SRK":
     carat_min = c1.number_input("Carat Min", min_value=0.0, step=0.01, value=0.0)
     carat_max = c2.number_input("Carat Max", min_value=0.0, step=0.01, value=0.0)
 
-    clarity = st.selectbox("Clarity", ["FL", "IF", "VVS1", "VVS2", "VS1", "VS2",
-                                        "SI1", "SI2", "SI3", "I1", "I2", "I3"])
-    colour = st.selectbox("Colour", ["D", "E", "F", "G", "H", "I", "J", "K", "L", "M"])
+    # Clarity / Colour as From-To ranges (Rapaport-style). SRK has no range
+    # control of its own — expand_scale_range() turns the pair into the list
+    # of chips to click, and apply_filters() already accepts a list per
+    # filter key and clicks each chip. "All" on either side = not applied.
+    cl1, cl2 = st.columns(2)
+    clarity_from = cl1.selectbox("Clarity From", [SRK_RANGE_ALL] + SRK_CLARITY_SCALE, index=0)
+    clarity_to = cl2.selectbox("Clarity To", [SRK_RANGE_ALL] + SRK_CLARITY_SCALE, index=0)
+    clarity_preview = expand_scale_range(SRK_CLARITY_SCALE, clarity_from, clarity_to)
+
+    co1, co2 = st.columns(2)
+    colour_from = co1.selectbox("Colour From", [SRK_RANGE_ALL] + SRK_COLOUR_SCALE, index=0)
+    colour_to = co2.selectbox("Colour To", [SRK_RANGE_ALL] + SRK_COLOUR_SCALE, index=0)
+    colour_preview = expand_scale_range(SRK_COLOUR_SCALE, colour_from, colour_to)
+
+    st.caption(
+        f"Will select on site — Clarity: {', '.join(clarity_preview) or 'All'} | "
+        f"Colour: {', '.join(colour_preview) or 'All'}"
+    )
     shade = st.selectbox("Shade", ["None", "Brown", "Mix Tinge 1", "Mix Tinge 2",
                                     "Pink Tinge", "Green Tinge"])
     cut = st.selectbox("Cut", ["EX", "VG", "G", "F"])
@@ -458,8 +474,12 @@ elif platform == "SRK":
                 "shape": shape or None,
                 "carat_from": carat_min or None,
                 "carat_to": carat_max or None,
-                "clarity": clarity or None,
-                "colour": colour or None,
+                # From/To pair sent straight through — srk_scraper's
+                # resolve_range_filters() expands it into the chips to click.
+                "clarity_from": clarity_from,
+                "clarity_to": clarity_to,
+                "colour_from": colour_from,
+                "colour_to": colour_to,
                 "shade": shade or None,
                 "cut": cut or None,
                 "polish": polish or None,
@@ -470,6 +490,21 @@ elif platform == "SRK":
                 "total_depth_from": total_depth_min or None,
                 "total_depth_to": total_depth_max or None,
             }
+
+            # Bring the Chrome window back to the front before driving it.
+            # The bulk path already does this; the single path didn't, so
+            # after clicking "I've Logged In -> Run Search" in the Streamlit
+            # tab the browser stayed buried behind it and every click landed
+            # on a background window.
+            try:
+                st.session_state.srk_driver.switch_to.window(
+                    st.session_state.srk_driver.current_window_handle
+                )
+                st.session_state.srk_driver.minimize_window()
+                st.session_state.srk_driver.maximize_window()
+            except Exception:
+                pass  # OS-level focus trick — window may already be gone/closed manually
+
             with st.spinner("Fetching results..."):
                 try:
                     srk_df = run_srk(st.session_state.srk_driver, filters, fetch_video=fetch_video)
